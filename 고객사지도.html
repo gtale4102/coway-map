@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>고객사 지도</title>
-<script src="https://developers.kakao.com/sdk/js/kakao.min.js"></script>
+<script type="text/javascript" src="//dapi.kakao.com/v2/maps/sdk.js?appkey=1f8090d36c43b8db729e5495eb0a0d59&libraries=services"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -1446,15 +1446,8 @@ function showToast(msg) {
 window.addEventListener('load', () => {
   loadData();
   checkLock();
-
-  // Kakao Maps 초기화
-  if (typeof kakao !== 'undefined') {
-    kakao.maps.load(() => {
-      Kakao.init('1f8090d36c43b8db729e5495eb0a0d59');
-      initMap();
-      renderLegend();
-    });
-  }
+  initMap();
+  renderLegend();
 });
 </script>
 </body>

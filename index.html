@@ -875,7 +875,7 @@ const STORAGE_KEY = 'coway_customers_v1';
 const CAT_KEY = 'coway_categories_v1';
 const PIN_KEY = 'coway_pin_v1';
 const PIN_ON_KEY = 'coway_pin_on_v1';
-const SHEET_URL = 'https://script.google.com/macros/s/AKfycbxWu3HEbmbd3yfqOrVkzZ0d4J2deD30OafI-yIUicu4_D8e4nClyFL1Q4tBfgfzz1Qj5g/exec';
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbyOzYvLke67-w9ENjZdF9ud6D0V9mHINA4I550KOQsPEd8g1bG_CQw1mK-VmBIvv5yraA/exec';
 
 const DEFAULT_CATEGORIES = [
   { id: 'c1', name: '계약 중', color: '#4f7cff' },
@@ -901,17 +901,42 @@ let currentColorTarget = null;
 let map = null;
 
 async function loadData() {
-  try {
-    const res = await fetch(SHEET_URL + '?action=getAll');
-    const data = await res.json();
-    customers = data.customers || [];
-    categories = data.categories && data.categories.length > 0 ? data.categories : DEFAULT_CATEGORIES;
-  } catch(e) {
-    // 오프라인 fallback
-    customers = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-    categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
-    showToast('오프라인 모드 - 로컬 데이터 사용 중');
-  }
+  return new Promise((resolve) => {
+    const cbName = 'sheetCallback_' + Date.now();
+    const script = document.createElement('script');
+    const timeout = setTimeout(() => {
+      // 타임아웃 시 로컬 fallback
+      delete window[cbName];
+      document.body.removeChild(script);
+      customers = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
+      showToast('오프라인 모드 - 로컬 데이터 사용 중');
+      resolve();
+    }, 8000);
+
+    window[cbName] = (data) => {
+      clearTimeout(timeout);
+      delete window[cbName];
+      document.body.removeChild(script);
+      customers = data.customers || [];
+      categories = data.categories && data.categories.length > 0 ? data.categories : DEFAULT_CATEGORIES;
+      // 로컬 백업
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
+      localStorage.setItem(CAT_KEY, JSON.stringify(categories));
+      resolve();
+    };
+
+    script.src = SHEET_URL + '?callback=' + cbName;
+    script.onerror = () => {
+      clearTimeout(timeout);
+      delete window[cbName];
+      customers = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
+      showToast('오프라인 모드 - 로컬 데이터 사용 중');
+      resolve();
+    };
+    document.body.appendChild(script);
+  });
 }
 
 async function saveData() {

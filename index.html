@@ -1651,9 +1651,17 @@ function showToast(msg) {
 }
 
 // ==================== ROUTE ====================
-let routeStops = []; // [{id, name, lat, lng}]
+let routeStops = [];
 let routePolylines = [];
 let routeMarkers = [];
+let routeTimeOverlays = [];
+let routeSegmentTimes = []; // 구간별 시간(초) 저장
+
+const SEGMENT_COLORS = ['#4f7cff','#3dd68c','#ffb347','#ff6b9d','#c77dff','#00d4ff','#ff8c42','#6bcb77'];
+
+function getSegmentColor(i) {
+  return SEGMENT_COLORS[i % SEGMENT_COLORS.length];
+}
 
 function toggleRoutePanel() {
   const panel = document.getElementById('route-panel');
@@ -1683,7 +1691,7 @@ function renderRoutePicker() {
     <div class="route-stop-row" style="cursor:pointer;" onclick="addRouteStop('${c.id}')">
       <span class="legend-dot" style="background:${getCategoryColor(c.category)};width:10px;height:10px;flex-shrink:0;"></span>
       <span class="route-stop-name">${c.name}</span>
-      <span style="font-size:11px;color:var(--text2);">${routeStops.find(r=>r.id===c.id)?'✓':''}</span>
+      <span style="font-size:11px;color:var(--success);">${routeStops.find(r=>r.id===c.id)?'✓':''}</span>
     </div>`).join('');
 }
 
@@ -1704,6 +1712,19 @@ function removeRouteStop(idx) {
   routeStops.splice(idx, 1);
   renderRouteStops();
   clearRouteLines();
+  routeSegmentTimes = [];
+  document.getElementById('route-summary').style.display = 'none';
+}
+
+function moveRouteStop(idx, dir) {
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= routeStops.length) return;
+  const tmp = routeStops[idx];
+  routeStops[idx] = routeStops[newIdx];
+  routeStops[newIdx] = tmp;
+  renderRouteStops();
+  clearRouteLines();
+  routeSegmentTimes = [];
   document.getElementById('route-summary').style.display = 'none';
 }
 
@@ -1713,17 +1734,27 @@ function renderRouteStops() {
     container.innerHTML = '<div class="empty-state" style="padding:20px;"><div>🗺️</div>경유지와 목적지를 추가하세요</div>';
     return;
   }
-  container.innerHTML = routeStops.map((s, i) => `
+  container.innerHTML = routeStops.map((s, i) => {
+    const color = getSegmentColor(i);
+    // i번째 stop에 도달하는 구간 시간 = routeSegmentTimes[i] (0번째=현재위치→1번째)
+    const segTime = routeSegmentTimes[i] ? Math.round(routeSegmentTimes[i]/60) + '분' : '';
+    return `
     <div class="route-stop-row">
-      <div class="route-stop-num ${i === routeStops.length-1 ? 'dest' : ''}">${i+1}</div>
+      <div class="route-stop-num" style="background:${color};">${i+1}</div>
       <span class="route-stop-name">${s.name}</span>
-      <span class="route-stop-time" id="rt-time-${i}"></span>
+      <span class="route-stop-time" style="color:${color};">${segTime}</span>
+      <div style="display:flex;flex-direction:column;gap:2px;">
+        <button class="route-stop-remove" style="font-size:13px;color:var(--text2);" onclick="moveRouteStop(${i},-1)">▲</button>
+        <button class="route-stop-remove" style="font-size:13px;color:var(--text2);" onclick="moveRouteStop(${i},1)">▼</button>
+      </div>
       <button class="route-stop-remove" onclick="removeRouteStop(${i})">−</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function clearRoute() {
   routeStops = [];
+  routeSegmentTimes = [];
   clearRouteLines();
   renderRouteStops();
   document.getElementById('route-summary').style.display = 'none';
@@ -1734,21 +1765,19 @@ function clearRouteLines() {
   routePolylines = [];
   routeMarkers.forEach(m => m.setMap(null));
   routeMarkers = [];
+  routeTimeOverlays.forEach(o => o.setMap(null));
+  routeTimeOverlays = [];
 }
 
 async function calcRoute() {
   if (routeStops.length < 2) { showToast('최소 2곳 이상 추가하세요'); return; }
-
-  // 현재 위치를 출발지로 사용
   showToast('경로 계산 중...');
   clearRouteLines();
+  routeSegmentTimes = [];
 
-  // 현재 위치 가져오기
   navigator.geolocation.getCurrentPosition(async (pos) => {
-    const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-    await drawRouteFromOrigin(origin);
+    await drawRouteFromOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude });
   }, async () => {
-    // 위치 못 가져오면 첫 번째 경유지를 출발지로
     await drawRouteFromOrigin(routeStops[0]);
   }, { enableHighAccuracy: true, timeout: 5000 });
 }
@@ -1758,30 +1787,29 @@ async function drawRouteFromOrigin(origin) {
   let totalTime = 0;
   let totalDist = 0;
   let allPoints = [];
-  let success = true;
-
-  // 구간별 경로 계산
+  let corsError = false;
   const stops = [origin, ...routeStops];
 
   for (let i = 0; i < stops.length - 1; i++) {
     const from = stops[i];
     const to = stops[i+1];
+    const color = getSegmentColor(i);
 
     try {
       const url = `https://apis-navi.kakaomobility.com/v1/directions?origin=${from.lng},${from.lat}&destination=${to.lng},${to.lat}&summary=false`;
-      const res = await fetch(url, {
-        headers: { 'Authorization': `KakaoAK ${REST_KEY}` }
-      });
+      const res = await fetch(url, { headers: { 'Authorization': `KakaoAK ${REST_KEY}` } });
 
-      if (!res.ok) throw new Error('API error ' + res.status);
+      if (!res.ok) throw new Error('API ' + res.status);
       const data = await res.json();
 
       if (data.routes && data.routes[0] && data.routes[0].result_code === 0) {
         const route = data.routes[0];
-        totalTime += route.summary.duration;
+        const segDuration = route.summary.duration;
+        totalTime += segDuration;
         totalDist += route.summary.distance;
+        routeSegmentTimes[i] = segDuration; // i번 구간 = stops[i]→stops[i+1]
 
-        // 경로 좌표 추출
+        // 경로 좌표
         const points = [];
         route.sections.forEach(section => {
           section.roads.forEach(road => {
@@ -1791,41 +1819,39 @@ async function drawRouteFromOrigin(origin) {
           });
         });
 
-        // 구간 폴리라인
         const polyline = new kakao.maps.Polyline({
-          path: points,
-          strokeWeight: 5,
-          strokeColor: i === stops.length-2 ? '#ff4f6a' : '#4f7cff',
-          strokeOpacity: 0.8,
-          strokeStyle: 'solid'
+          path: points, strokeWeight: 5,
+          strokeColor: color, strokeOpacity: 0.85, strokeStyle: 'solid'
         });
         polyline.setMap(map);
         routePolylines.push(polyline);
         allPoints = allPoints.concat(points);
 
-        // 구간 시간 표시
-        if (i > 0) {
-          const mins = Math.round(route.summary.duration / 60);
-          const el = document.getElementById('rt-time-' + (i-1));
-          if (el) el.textContent = mins + '분';
-        }
+        // 도착지(to) 위에 시간 말풍선
+        const mins = Math.round(segDuration / 60);
+        const midIdx = Math.floor(points.length / 2);
+        const midPoint = midIdx < points.length ? points[midIdx] : new kakao.maps.LatLng(to.lat, to.lng);
+        const bubble = new kakao.maps.CustomOverlay({
+          position: midPoint,
+          content: `<div style="background:${color};color:#fff;border-radius:12px;padding:3px 8px;font-size:11px;font-weight:700;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.3);">${mins}분</div>`,
+          zIndex: 25
+        });
+        bubble.setMap(map);
+        routeTimeOverlays.push(bubble);
+
       } else {
-        success = false;
+        throw new Error('route fail');
       }
     } catch(e) {
-      console.error('Route error:', e);
-      success = false;
-      // CORS 실패시 직선으로 대체
+      corsError = true;
+      // 직선 대체
       const points = [
         new kakao.maps.LatLng(from.lat, from.lng),
         new kakao.maps.LatLng(to.lat, to.lng)
       ];
       const polyline = new kakao.maps.Polyline({
-        path: points,
-        strokeWeight: 4,
-        strokeColor: '#ffb347',
-        strokeOpacity: 0.7,
-        strokeStyle: 'shortdash'
+        path: points, strokeWeight: 4,
+        strokeColor: color, strokeOpacity: 0.6, strokeStyle: 'shortdash'
       });
       polyline.setMap(map);
       routePolylines.push(polyline);
@@ -1833,36 +1859,40 @@ async function drawRouteFromOrigin(origin) {
     }
   }
 
-  // 경유지 마커
+  // 경유지 번호 마커
   routeStops.forEach((s, i) => {
+    const color = getSegmentColor(i);
     const overlay = new kakao.maps.CustomOverlay({
       position: new kakao.maps.LatLng(s.lat, s.lng),
-      content: `<div style="background:${i===routeStops.length-1?'#ff4f6a':'#4f7cff'};color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:2px solid #fff;">${i+1}</div>`,
+      content: `<div style="background:${color};color:#fff;border-radius:50%;width:26px;height:26px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.3);">${i+1}</div>`,
       zIndex: 20
     });
     overlay.setMap(map);
     routeMarkers.push(overlay);
   });
 
-  // 지도 범위 조정
+  // 지도 범위
   if (allPoints.length > 0) {
     const bounds = new kakao.maps.LatLngBounds();
     allPoints.forEach(p => bounds.extend(p));
     map.setBounds(bounds);
   }
 
-  // 요약 표시
+  // 패널 구간 시간 갱신
+  renderRouteStops();
+
+  // 요약
   const summary = document.getElementById('route-summary');
-  if (success && totalTime > 0) {
+  if (!corsError && totalTime > 0) {
     const mins = Math.round(totalTime / 60);
     const km = (totalDist / 1000).toFixed(1);
     summary.textContent = `총 ${km}km · 약 ${mins}분 (교통 상황 미반영)`;
     summary.style.display = 'block';
     showToast('경로 계산 완료');
   } else {
-    summary.textContent = success ? '' : '일부 구간은 직선으로 표시됩니다';
-    summary.style.display = success ? 'none' : 'block';
-    showToast(success ? '경로 표시 완료' : 'API 오류 - 직선으로 표시');
+    summary.textContent = corsError ? '직선으로 표시됩니다 (API 연결 실패)' : '';
+    summary.style.display = corsError ? 'block' : 'none';
+    showToast(corsError ? 'API 오류 - 직선으로 표시' : '완료');
   }
 }
 

@@ -694,13 +694,10 @@
       <span class="legend-dot" style="background:var(--text2)"></span>전체
     </div>
     <div class="legend-chip inactive" id="owner-me" onclick="setOwnerFilter('me')" style="border-color:var(--accent); color:var(--accent);">
-      <span class="legend-dot" style="background:var(--accent)"></span>내 것
+      <span class="legend-dot" style="background:var(--accent)"></span><span id="owner-me-label">김태일</span>
     </div>
     <div class="legend-chip inactive" id="owner-partner" onclick="setOwnerFilter('partner')" style="border-color:var(--accent2); color:var(--accent2);">
       <span class="legend-dot" style="background:var(--accent2)"></span>정열
-    </div>
-    <div class="legend-chip inactive" id="owner-shared" onclick="setOwnerFilter('shared')" style="border-color:var(--success); color:var(--success);">
-      <span class="legend-dot" style="background:var(--success)"></span>공유
     </div>
   </div>
   <div class="legend-bar" id="legend-bar"></div>
@@ -768,14 +765,7 @@
       <label class="form-label">분류</label>
       <select class="form-select" id="f-category"></select>
     </div>
-    <div class="form-group">
-      <label class="form-label">소유자</label>
-      <select class="form-select" id="f-owner">
-        <option value="태일">김태일</option>
-        <option value="정열">정열</option>
-        <option value="shared">공유</option>
-      </select>
-    </div>
+
 
     <div class="section-divider">담당자</div>
     <div class="multi-entry" id="f-contacts"></div>
@@ -1043,13 +1033,20 @@ function selectUser(name) {
     document.getElementById('lock-screen').style.display = 'flex';
     document.getElementById('main-ui').style.display = 'none';
   }
+  // 내 것 레이블 업데이트
+  updateOwnerLabel();
   // 소유자 필터 기본값 내 것으로
   setOwnerFilter('me');
 }
 
+function updateOwnerLabel() {
+  const label = document.getElementById('owner-me-label');
+  if (label) label.textContent = currentUser === '태일' ? '김태일' : currentUser;
+}
+
 function setOwnerFilter(filter) {
   ownerFilter = filter;
-  ['all','me','partner','shared'].forEach(f => {
+  ['all','me','partner'].forEach(f => {
     const el = document.getElementById('owner-' + f);
     if (el) el.classList.toggle('inactive', f !== filter);
   });
@@ -1215,7 +1212,6 @@ function renderAllMarkers() {
     // 소유자 필터
     if (ownerFilter === 'me' && c.owner !== currentUser) return;
     if (ownerFilter === 'partner' && c.owner === currentUser) return;
-    if (ownerFilter === 'shared' && c.owner !== 'shared') return;
 
     const color = getCategoryColor(c.category);
     const markerImg = makeMarkerImage(color);
@@ -1413,9 +1409,7 @@ function openAddSheet() {
   populateCategorySelect();
   document.getElementById('f-contacts').innerHTML = '';
   document.getElementById('f-addresses').innerHTML = '';
-  // 소유자 기본값 = 현재 사용자
-  const ownerSel = document.getElementById('f-owner');
-  if (ownerSel) ownerSel.value = currentUser || '태일';
+
   addContactRow();
   addAddressRow();
   openSheet('form-sheet');
@@ -1429,8 +1423,7 @@ function openEditSheet(id) {
   document.getElementById('f-name').value = c.name;
   document.getElementById('f-memo').value = c.memo || '';
   populateCategorySelect(c.category);
-  const ownerSel = document.getElementById('f-owner');
-  if (ownerSel) ownerSel.value = c.owner || currentUser || '태일';
+
 
   document.getElementById('f-contacts').innerHTML = '';
   (c.contacts || []).forEach(ct => addContactRow(ct));
@@ -1516,7 +1509,7 @@ async function submitForm() {
     if (geo) { lat = geo.lat; lng = geo.lng; }
   }
 
-  const owner = document.getElementById('f-owner').value;
+  const owner = currentUser;
 
   if (editingCustomerId) {
     const idx = customers.findIndex(c => c.id === editingCustomerId);
@@ -2079,6 +2072,7 @@ window.addEventListener("load", async () => {
   kakao.maps.load(() => {
     initMap();
     renderLegend();
+    updateOwnerLabel();
     if (currentUser) setOwnerFilter('me');
   });
 });

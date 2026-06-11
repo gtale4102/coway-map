@@ -631,6 +631,17 @@
 </head>
 <body>
 
+<!-- USER SELECT SCREEN -->
+<div id="user-screen" style="display:none; position:fixed; inset:0; background:var(--bg); z-index:1000; flex-direction:column; align-items:center; justify-content:center; gap:20px;">
+  <div style="font-size:40px;">👤</div>
+  <h2 style="font-size:20px; font-weight:700;">사용자 선택</h2>
+  <p style="font-size:14px; color:var(--text2);">본인을 선택하세요</p>
+  <div style="display:flex; gap:12px; margin-top:10px;">
+    <button onclick="selectUser('태일')" style="background:var(--surface); border:1.5px solid var(--accent); color:var(--text); border-radius:var(--radius); padding:16px 28px; font-size:16px; font-weight:700; cursor:pointer;">김태일</button>
+    <button onclick="selectUser('정열')" style="background:var(--surface); border:1.5px solid var(--accent2); color:var(--text); border-radius:var(--radius); padding:16px 28px; font-size:16px; font-weight:700; cursor:pointer;">정열</button>
+  </div>
+</div>
+
 <!-- LOCK SCREEN -->
 <div id="lock-screen" style="display:none;">
   <div style="font-size:40px;">🔒</div>
@@ -678,6 +689,20 @@
     <div id="search-results"></div>
   </div>
 
+  <div style="display:flex; gap:6px; padding:6px 14px; background:var(--surface); border-bottom:1px solid var(--border); flex-shrink:0; overflow-x:auto; scrollbar-width:none;">
+    <div class="legend-chip" id="owner-all" onclick="setOwnerFilter('all')" style="border-color:var(--text2); color:var(--text2);">
+      <span class="legend-dot" style="background:var(--text2)"></span>전체
+    </div>
+    <div class="legend-chip inactive" id="owner-me" onclick="setOwnerFilter('me')" style="border-color:var(--accent); color:var(--accent);">
+      <span class="legend-dot" style="background:var(--accent)"></span>내 것
+    </div>
+    <div class="legend-chip inactive" id="owner-partner" onclick="setOwnerFilter('partner')" style="border-color:var(--accent2); color:var(--accent2);">
+      <span class="legend-dot" style="background:var(--accent2)"></span>정열
+    </div>
+    <div class="legend-chip inactive" id="owner-shared" onclick="setOwnerFilter('shared')" style="border-color:var(--success); color:var(--success);">
+      <span class="legend-dot" style="background:var(--success)"></span>공유
+    </div>
+  </div>
   <div class="legend-bar" id="legend-bar"></div>
 
   <div id="map">
@@ -742,6 +767,14 @@
     <div class="form-group">
       <label class="form-label">분류</label>
       <select class="form-select" id="f-category"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">소유자</label>
+      <select class="form-select" id="f-owner">
+        <option value="태일">김태일</option>
+        <option value="정열">정열</option>
+        <option value="shared">공유</option>
+      </select>
     </div>
 
     <div class="section-divider">담당자</div>
@@ -828,6 +861,13 @@
   <div class="sheet-body">
     <div class="setting-row">
       <div class="setting-info">
+        <div class="setting-title">현재 사용자</div>
+        <div class="setting-desc" id="current-user-label"></div>
+      </div>
+      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="changeUser()">변경</button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
         <div class="setting-title">PIN 잠금</div>
         <div class="setting-desc">앱 실행 시 PIN 번호를 요구합니다</div>
       </div>
@@ -875,6 +915,7 @@ const STORAGE_KEY = 'coway_customers_v1';
 const CAT_KEY = 'coway_categories_v1';
 const PIN_KEY = 'coway_pin_v1';
 const PIN_ON_KEY = 'coway_pin_on_v1';
+const USER_KEY = 'coway_user_v1';
 const SHEET_URL = 'https://script.google.com/macros/s/AKfycbw2Sk9CRyl2klNZy__zOAQjSuXV9nRHT2gkarjZ91Lcx0AsWsn4FMWiieBgIoWsMbfSrA/exec';
 
 const DEFAULT_CATEGORIES = [
@@ -895,6 +936,8 @@ let customers = [];
 let categories = [];
 let markers = {};
 let activeFilters = new Set();
+let ownerFilter = 'all';
+let currentUser = '';
 let editingCustomerId = null;
 let selectedLogType = null;
 let currentColorTarget = null;
@@ -981,9 +1024,41 @@ function saveToSheet() {
 // ==================== PIN ====================
 let pinBuffer = '';
 
-function checkLock() {
+function checkUser() {
+  currentUser = localStorage.getItem(USER_KEY) || '';
+  if (!currentUser) {
+    document.getElementById('user-screen').style.display = 'flex';
+    document.getElementById('main-ui').style.display = 'none';
+  }
+}
+
+function selectUser(name) {
+  currentUser = name;
+  localStorage.setItem(USER_KEY, name);
+  document.getElementById('user-screen').style.display = 'none';
+  document.getElementById('main-ui').style.display = 'flex';
+  // PIN 체크
   const pinOn = localStorage.getItem(PIN_ON_KEY) === '1';
   if (pinOn) {
+    document.getElementById('lock-screen').style.display = 'flex';
+    document.getElementById('main-ui').style.display = 'none';
+  }
+  // 소유자 필터 기본값 내 것으로
+  setOwnerFilter('me');
+}
+
+function setOwnerFilter(filter) {
+  ownerFilter = filter;
+  ['all','me','partner','shared'].forEach(f => {
+    const el = document.getElementById('owner-' + f);
+    if (el) el.classList.toggle('inactive', f !== filter);
+  });
+  renderAllMarkers();
+}
+
+function checkLock() {
+  const pinOn = localStorage.getItem(PIN_ON_KEY) === '1';
+  if (pinOn && currentUser) {
     document.getElementById('lock-screen').style.display = 'flex';
     document.getElementById('main-ui').style.display = 'none';
   }
@@ -1137,6 +1212,10 @@ function renderAllMarkers() {
   customers.forEach(c => {
     if (!c.lat || !c.lng) return;
     if (activeFilters.size > 0 && !activeFilters.has(c.category)) return;
+    // 소유자 필터
+    if (ownerFilter === 'me' && c.owner !== currentUser) return;
+    if (ownerFilter === 'partner' && c.owner === currentUser) return;
+    if (ownerFilter === 'shared' && c.owner !== 'shared') return;
 
     const color = getCategoryColor(c.category);
     const markerImg = makeMarkerImage(color);
@@ -1334,6 +1413,9 @@ function openAddSheet() {
   populateCategorySelect();
   document.getElementById('f-contacts').innerHTML = '';
   document.getElementById('f-addresses').innerHTML = '';
+  // 소유자 기본값 = 현재 사용자
+  const ownerSel = document.getElementById('f-owner');
+  if (ownerSel) ownerSel.value = currentUser || '태일';
   addContactRow();
   addAddressRow();
   openSheet('form-sheet');
@@ -1347,6 +1429,8 @@ function openEditSheet(id) {
   document.getElementById('f-name').value = c.name;
   document.getElementById('f-memo').value = c.memo || '';
   populateCategorySelect(c.category);
+  const ownerSel = document.getElementById('f-owner');
+  if (ownerSel) ownerSel.value = c.owner || currentUser || '태일';
 
   document.getElementById('f-contacts').innerHTML = '';
   (c.contacts || []).forEach(ct => addContactRow(ct));
@@ -1432,15 +1516,17 @@ async function submitForm() {
     if (geo) { lat = geo.lat; lng = geo.lng; }
   }
 
+  const owner = document.getElementById('f-owner').value;
+
   if (editingCustomerId) {
     const idx = customers.findIndex(c => c.id === editingCustomerId);
     if (idx !== -1) {
-      customers[idx] = { ...customers[idx], name, category, memo, contacts, addresses, lat, lng };
+      customers[idx] = { ...customers[idx], name, category, memo, contacts, addresses, lat, lng, owner };
     }
   } else {
     customers.push({
       id: 'cst_' + Date.now(),
-      name, category, memo, contacts, addresses, lat, lng,
+      name, category, memo, contacts, addresses, lat, lng, owner,
       logs: [],
       createdAt: new Date().toISOString()
     });
@@ -1677,6 +1763,8 @@ function openSheet(id) {
   if (id === 'settings-sheet') {
     const isOn = localStorage.getItem(PIN_ON_KEY) === '1';
     document.getElementById('pin-toggle').classList.toggle('on', isOn);
+    const label = document.getElementById('current-user-label');
+    if (label) label.textContent = currentUser === '태일' ? '김태일' : currentUser || '미설정';
   }
 }
 
@@ -1692,6 +1780,14 @@ function closeAllSheets() {
 }
 
 // ==================== EXPORT/IMPORT ====================
+function changeUser() {
+  localStorage.removeItem(USER_KEY);
+  currentUser = '';
+  closeAllSheets();
+  document.getElementById('user-screen').style.display = 'flex';
+  document.getElementById('main-ui').style.display = 'none';
+}
+
 function exportData() {
   const data = { customers, categories, exportedAt: new Date().toISOString() };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -1975,12 +2071,15 @@ async function drawRouteFromOrigin(origin) {
 
 // ==================== INIT ====================
 window.addEventListener("load", async () => {
+  currentUser = localStorage.getItem(USER_KEY) || '';
+  checkUser();
   checkLock();
   showToast('데이터 불러오는 중...');
   await loadData();
   kakao.maps.load(() => {
     initMap();
     renderLegend();
+    if (currentUser) setOwnerFilter('me');
   });
 });
 

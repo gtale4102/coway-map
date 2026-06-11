@@ -495,6 +495,13 @@
   }
   .cp-swatch:hover { border-color: #fff; }
 
+  .my-location-dot {
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #4f7cff;
+    border: 3px solid #fff;
+    box-shadow: 0 0 0 3px rgba(79,124,255,0.3);
+  }
+
   .toast {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     background: var(--surface2); border: 1px solid var(--border);
@@ -849,6 +856,10 @@ function savePin() {
 }
 
 // ==================== MAP ====================
+let myLocationMarker = null;
+let myLocationCircle = null;
+let watchId = null;
+
 function initMap() {
   const container = document.getElementById('map');
   const options = {
@@ -857,15 +868,50 @@ function initMap() {
   };
   map = new kakao.maps.Map(container, options);
 
-  // 현재 위치로 이동
+  // 현재 위치 실시간 추적
   if (navigator.geolocation) {
+    // 최초 위치로 이동
     navigator.geolocation.getCurrentPosition(pos => {
       const latlng = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
       map.setCenter(latlng);
-    });
+      updateMyLocation(latlng);
+    }, null, { enableHighAccuracy: true });
+
+    // 실시간 추적
+    watchId = navigator.geolocation.watchPosition(pos => {
+      const latlng = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+      updateMyLocation(latlng);
+    }, null, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
   }
 
   renderAllMarkers();
+}
+
+function updateMyLocation(latlng) {
+  // 기존 마커 제거
+  if (myLocationMarker) myLocationMarker.setMap(null);
+  if (myLocationCircle) myLocationCircle.setMap(null);
+
+  // 파란 점 마커
+  const dotContent = `<div class="my-location-dot"></div>`;
+  myLocationMarker = new kakao.maps.CustomOverlay({
+    position: latlng,
+    content: dotContent,
+    zIndex: 10
+  });
+  myLocationMarker.setMap(map);
+
+  // 정확도 원 (반경 표시)
+  myLocationCircle = new kakao.maps.Circle({
+    center: latlng,
+    radius: 80,
+    strokeWeight: 1,
+    strokeColor: '#4f7cff',
+    strokeOpacity: 0.4,
+    fillColor: '#4f7cff',
+    fillOpacity: 0.08
+  });
+  myLocationCircle.setMap(map);
 }
 
 function getCategoryColor(catId) {
@@ -1027,6 +1073,7 @@ function openDetail(id) {
       <button class="action-btn primary" onclick="openQuickLog('${id}')">✏️ 컨택 기록</button>
       <button class="action-btn secondary" onclick="openEditSheet('${id}')">수정</button>
       <button class="action-btn map-btn" onclick="moveToMarker('${id}')">📍 지도에서 보기</button>
+      <button class="action-btn map-btn" onclick="openRoadview('${id}')">🔭 로드뷰</button>
       <button class="action-btn danger" onclick="deleteCustomer('${id}')">삭제</button>
     </div>
   `;
@@ -1044,6 +1091,22 @@ function openKakaoNavi(address) {
   setTimeout(() => {
     window.open(`https://map.kakao.com/?q=${encodeURIComponent(address)}`, '_blank');
   }, 500);
+}
+
+function openRoadview(id) {
+  const c = customers.find(x => x.id === id);
+  if (!c) return;
+  if (c.lat && c.lng) {
+    // 카카오맵 로드뷰 앱 딥링크 시도, 실패시 웹으로
+    const appUrl = `kakaomap://route?ep=${c.lat},${c.lng}&by=CAR`;
+    const webUrl = `https://map.kakao.com/link/roadview/${c.lat},${c.lng}`;
+    window.open(webUrl, '_blank');
+  } else if (c.addresses && c.addresses.length > 0) {
+    const addr = encodeURIComponent(c.addresses[0].address);
+    window.open(`https://map.kakao.com/?q=${addr}&panel=roadview`, '_blank');
+  } else {
+    showToast('주소 또는 좌표가 없습니다');
+  }
 }
 
 function moveToMarker(id) {

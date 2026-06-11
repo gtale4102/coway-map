@@ -1056,21 +1056,28 @@ function initMap() {
   };
   map = new kakao.maps.Map(container, options);
 
-  // 현재 위치 실시간 추적
-  if (navigator.geolocation) {
-    // 최초 위치로 이동
+  // 모바일/PC 구분
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+  if (navigator.geolocation && isMobile) {
+    // 모바일: 실시간 현위치 추적
     navigator.geolocation.getCurrentPosition(pos => {
       const latlng = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
       map.setCenter(latlng);
       updateMyLocation(latlng);
-      setTimeout(() => kakao.maps.event.trigger(map, 'resize'), 300);
     }, null, { enableHighAccuracy: true });
 
-    // 실시간 추적
     watchId = navigator.geolocation.watchPosition(pos => {
       const latlng = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
       updateMyLocation(latlng);
     }, null, { enableHighAccuracy: true, maximumAge: 10000, timeout: 20000 });
+
+  } else if (navigator.geolocation && !isMobile) {
+    // PC: 현위치 점만 표시, 지도 이동 안 함
+    navigator.geolocation.getCurrentPosition(pos => {
+      const latlng = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+      updateMyLocation(latlng);
+    }, null, { enableHighAccuracy: false, timeout: 5000 });
   }
 
   renderAllMarkers();

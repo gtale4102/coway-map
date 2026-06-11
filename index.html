@@ -1913,6 +1913,13 @@ window.addEventListener("load", () => {
     renderLegend();
   });
 });
+
+// 창 크기 변경 시 지도 재조정
+window.addEventListener('resize', () => {
+  if (map) {
+    kakao.maps.event.trigger(map, 'resize');
+  }
+});
 </script>
 </body>
 </html>

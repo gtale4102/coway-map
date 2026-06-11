@@ -502,6 +502,97 @@
     box-shadow: 0 0 0 3px rgba(79,124,255,0.3);
   }
 
+  /* ROUTE PANEL */
+  .route-panel {
+    position: absolute;
+    top: 10px; left: 10px; right: 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    z-index: 50;
+    max-height: 60vh;
+    display: none;
+    flex-direction: column;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+  .route-panel.open { display: flex; }
+  .route-panel-header {
+    display: flex; align-items: center;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .route-panel-title { font-size: 14px; font-weight: 700; flex: 1; }
+  .route-panel-close {
+    background: none; border: none; color: var(--text2);
+    font-size: 18px; cursor: pointer;
+  }
+  .route-stops {
+    overflow-y: auto;
+    padding: 8px;
+    flex: 1;
+  }
+  .route-stop-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .route-stop-row:last-child { border-bottom: none; }
+  .route-stop-num {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .route-stop-num.dest { background: var(--danger); }
+  .route-stop-name { font-size: 13px; flex: 1; }
+  .route-stop-time { font-size: 12px; color: var(--success); font-weight: 600; white-space: nowrap; }
+  .route-stop-remove {
+    background: none; border: none; color: var(--danger);
+    font-size: 16px; cursor: pointer; padding: 2px;
+  }
+  .route-add-btn {
+    margin: 8px;
+    padding: 8px;
+    background: none;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text2);
+    font-size: 13px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .route-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .route-actions {
+    display: flex; gap: 6px;
+    padding: 8px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .route-summary {
+    padding: 6px 12px;
+    font-size: 12px; color: var(--text2);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  /* 경로 버튼 */
+  .route-fab {
+    position: absolute;
+    bottom: 140px; right: 16px;
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-size: 20px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+    z-index: 50;
+  }
+
   .toast {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     background: var(--surface2); border: 1px solid var(--border);
@@ -583,7 +674,35 @@
 
   <div id="map">
     <button class="fab" onclick="openAddSheet()">＋</button>
+    <button class="route-fab" onclick="toggleRoutePanel()" title="동선 짜기">🗺️</button>
     <button class="daily-btn" onclick="openSheet('daily-sheet')">📋 오늘 기록</button>
+
+    <!-- ROUTE PANEL -->
+    <div class="route-panel" id="route-panel">
+      <div class="route-panel-header">
+        <div class="route-panel-title">🗺️ 동선 짜기</div>
+        <button class="route-panel-close" onclick="toggleRoutePanel()">✕</button>
+      </div>
+      <div class="route-stops" id="route-stops"></div>
+      <button class="route-add-btn" onclick="openRouteAddPicker()">+ 경유지 / 목적지 추가</button>
+      <div class="route-summary" id="route-summary" style="display:none;"></div>
+      <div class="route-actions">
+        <button class="action-btn secondary" style="flex:1; padding:8px; font-size:12px;" onclick="clearRoute()">초기화</button>
+        <button class="action-btn primary" style="flex:2; padding:8px; font-size:12px;" onclick="calcRoute()">경로 계산</button>
+      </div>
+    </div>
+
+    <!-- ROUTE ADD PICKER -->
+    <div class="route-panel" id="route-picker" style="top:auto; bottom:10px; max-height:50vh;">
+      <div class="route-panel-header">
+        <div class="route-panel-title">고객사 선택</div>
+        <button class="route-panel-close" onclick="closeRoutePicker()">✕</button>
+      </div>
+      <div style="padding:8px;">
+        <input type="text" class="form-input" id="route-picker-search" placeholder="검색..." oninput="renderRoutePicker()" style="margin-bottom:8px;">
+      </div>
+      <div class="route-stops" id="route-picker-list"></div>
+    </div>
   </div>
 </div>
 
@@ -1529,6 +1648,222 @@ function showToast(msg) {
   t.textContent = msg;
   t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 2000);
+}
+
+// ==================== ROUTE ====================
+let routeStops = []; // [{id, name, lat, lng}]
+let routePolylines = [];
+let routeMarkers = [];
+
+function toggleRoutePanel() {
+  const panel = document.getElementById('route-panel');
+  panel.classList.toggle('open');
+  if (panel.classList.contains('open')) renderRouteStops();
+}
+
+function openRouteAddPicker() {
+  document.getElementById('route-picker-search').value = '';
+  renderRoutePicker();
+  document.getElementById('route-picker').classList.add('open');
+}
+
+function closeRoutePicker() {
+  document.getElementById('route-picker').classList.remove('open');
+}
+
+function renderRoutePicker() {
+  const q = document.getElementById('route-picker-search').value.toLowerCase();
+  const list = document.getElementById('route-picker-list');
+  const filtered = customers.filter(c => c.lat && c.lng && c.name.toLowerCase().includes(q));
+  if (filtered.length === 0) {
+    list.innerHTML = '<div class="empty-state"><div>📭</div>좌표가 등록된 고객사가 없습니다</div>';
+    return;
+  }
+  list.innerHTML = filtered.map(c => `
+    <div class="route-stop-row" style="cursor:pointer;" onclick="addRouteStop('${c.id}')">
+      <span class="legend-dot" style="background:${getCategoryColor(c.category)};width:10px;height:10px;flex-shrink:0;"></span>
+      <span class="route-stop-name">${c.name}</span>
+      <span style="font-size:11px;color:var(--text2);">${routeStops.find(r=>r.id===c.id)?'✓':''}</span>
+    </div>`).join('');
+}
+
+function addRouteStop(custId) {
+  const c = customers.find(x => x.id === custId);
+  if (!c || !c.lat) return;
+  if (routeStops.find(r => r.id === custId)) {
+    showToast('이미 추가된 고객사입니다');
+    return;
+  }
+  routeStops.push({ id: custId, name: c.name, lat: c.lat, lng: c.lng });
+  closeRoutePicker();
+  renderRouteStops();
+  clearRouteLines();
+}
+
+function removeRouteStop(idx) {
+  routeStops.splice(idx, 1);
+  renderRouteStops();
+  clearRouteLines();
+  document.getElementById('route-summary').style.display = 'none';
+}
+
+function renderRouteStops() {
+  const container = document.getElementById('route-stops');
+  if (routeStops.length === 0) {
+    container.innerHTML = '<div class="empty-state" style="padding:20px;"><div>🗺️</div>경유지와 목적지를 추가하세요</div>';
+    return;
+  }
+  container.innerHTML = routeStops.map((s, i) => `
+    <div class="route-stop-row">
+      <div class="route-stop-num ${i === routeStops.length-1 ? 'dest' : ''}">${i+1}</div>
+      <span class="route-stop-name">${s.name}</span>
+      <span class="route-stop-time" id="rt-time-${i}"></span>
+      <button class="route-stop-remove" onclick="removeRouteStop(${i})">−</button>
+    </div>`).join('');
+}
+
+function clearRoute() {
+  routeStops = [];
+  clearRouteLines();
+  renderRouteStops();
+  document.getElementById('route-summary').style.display = 'none';
+}
+
+function clearRouteLines() {
+  routePolylines.forEach(p => p.setMap(null));
+  routePolylines = [];
+  routeMarkers.forEach(m => m.setMap(null));
+  routeMarkers = [];
+}
+
+async function calcRoute() {
+  if (routeStops.length < 2) { showToast('최소 2곳 이상 추가하세요'); return; }
+
+  // 현재 위치를 출발지로 사용
+  showToast('경로 계산 중...');
+  clearRouteLines();
+
+  // 현재 위치 가져오기
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const origin = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+    await drawRouteFromOrigin(origin);
+  }, async () => {
+    // 위치 못 가져오면 첫 번째 경유지를 출발지로
+    await drawRouteFromOrigin(routeStops[0]);
+  }, { enableHighAccuracy: true, timeout: 5000 });
+}
+
+async function drawRouteFromOrigin(origin) {
+  const REST_KEY = '74494a174ed10a9a831c4ab1c92460a1';
+  let totalTime = 0;
+  let totalDist = 0;
+  let allPoints = [];
+  let success = true;
+
+  // 구간별 경로 계산
+  const stops = [origin, ...routeStops];
+
+  for (let i = 0; i < stops.length - 1; i++) {
+    const from = stops[i];
+    const to = stops[i+1];
+
+    try {
+      const url = `https://apis-navi.kakaomobility.com/v1/directions?origin=${from.lng},${from.lat}&destination=${to.lng},${to.lat}&summary=false`;
+      const res = await fetch(url, {
+        headers: { 'Authorization': `KakaoAK ${REST_KEY}` }
+      });
+
+      if (!res.ok) throw new Error('API error ' + res.status);
+      const data = await res.json();
+
+      if (data.routes && data.routes[0] && data.routes[0].result_code === 0) {
+        const route = data.routes[0];
+        totalTime += route.summary.duration;
+        totalDist += route.summary.distance;
+
+        // 경로 좌표 추출
+        const points = [];
+        route.sections.forEach(section => {
+          section.roads.forEach(road => {
+            for (let j = 0; j < road.vertexes.length; j += 2) {
+              points.push(new kakao.maps.LatLng(road.vertexes[j+1], road.vertexes[j]));
+            }
+          });
+        });
+
+        // 구간 폴리라인
+        const polyline = new kakao.maps.Polyline({
+          path: points,
+          strokeWeight: 5,
+          strokeColor: i === stops.length-2 ? '#ff4f6a' : '#4f7cff',
+          strokeOpacity: 0.8,
+          strokeStyle: 'solid'
+        });
+        polyline.setMap(map);
+        routePolylines.push(polyline);
+        allPoints = allPoints.concat(points);
+
+        // 구간 시간 표시
+        if (i > 0) {
+          const mins = Math.round(route.summary.duration / 60);
+          const el = document.getElementById('rt-time-' + (i-1));
+          if (el) el.textContent = mins + '분';
+        }
+      } else {
+        success = false;
+      }
+    } catch(e) {
+      console.error('Route error:', e);
+      success = false;
+      // CORS 실패시 직선으로 대체
+      const points = [
+        new kakao.maps.LatLng(from.lat, from.lng),
+        new kakao.maps.LatLng(to.lat, to.lng)
+      ];
+      const polyline = new kakao.maps.Polyline({
+        path: points,
+        strokeWeight: 4,
+        strokeColor: '#ffb347',
+        strokeOpacity: 0.7,
+        strokeStyle: 'shortdash'
+      });
+      polyline.setMap(map);
+      routePolylines.push(polyline);
+      allPoints = allPoints.concat(points);
+    }
+  }
+
+  // 경유지 마커
+  routeStops.forEach((s, i) => {
+    const overlay = new kakao.maps.CustomOverlay({
+      position: new kakao.maps.LatLng(s.lat, s.lng),
+      content: `<div style="background:${i===routeStops.length-1?'#ff4f6a':'#4f7cff'};color:#fff;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:2px solid #fff;">${i+1}</div>`,
+      zIndex: 20
+    });
+    overlay.setMap(map);
+    routeMarkers.push(overlay);
+  });
+
+  // 지도 범위 조정
+  if (allPoints.length > 0) {
+    const bounds = new kakao.maps.LatLngBounds();
+    allPoints.forEach(p => bounds.extend(p));
+    map.setBounds(bounds);
+  }
+
+  // 요약 표시
+  const summary = document.getElementById('route-summary');
+  if (success && totalTime > 0) {
+    const mins = Math.round(totalTime / 60);
+    const km = (totalDist / 1000).toFixed(1);
+    summary.textContent = `총 ${km}km · 약 ${mins}분 (교통 상황 미반영)`;
+    summary.style.display = 'block';
+    showToast('경로 계산 완료');
+  } else {
+    summary.textContent = success ? '' : '일부 구간은 직선으로 표시됩니다';
+    summary.style.display = success ? 'none' : 'block';
+    showToast(success ? '경로 표시 완료' : 'API 오류 - 직선으로 표시');
+  }
 }
 
 // ==================== INIT ====================

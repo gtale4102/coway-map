@@ -1438,9 +1438,24 @@ function openColorPicker(e, catIdx) {
   cp.innerHTML = PALETTE.map(col =>
     `<div class="cp-swatch" style="background:${col}" onclick="pickColor('${col}')"></div>`
   ).join('');
-  cp.style.left = (e.clientX - 100) + 'px';
-  cp.style.top = (e.clientY + 10) + 'px';
+
   cp.classList.add('open');
+
+  // 화면 밖 잘림 방지
+  const rect = cp.getBoundingClientRect();
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+
+  let left = e.clientX - 100;
+  let top = e.clientY + 10;
+
+  if (left < 8) left = 8;
+  if (left + 200 > vw - 8) left = vw - 208;
+  if (top + 120 > vh - 8) top = e.clientY - 130;
+
+  cp.style.left = left + 'px';
+  cp.style.top = top + 'px';
+
   e.stopPropagation();
 }
 

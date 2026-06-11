@@ -875,6 +875,7 @@ const STORAGE_KEY = 'coway_customers_v1';
 const CAT_KEY = 'coway_categories_v1';
 const PIN_KEY = 'coway_pin_v1';
 const PIN_ON_KEY = 'coway_pin_on_v1';
+const SHEET_URL = 'https://script.google.com/macros/s/AKfycbxWu3HEbmbd3yfqOrVkzZ0d4J2deD30OafI-yIUicu4_D8e4nClyFL1Q4tBfgfzz1Qj5g/exec';
 
 const DEFAULT_CATEGORIES = [
   { id: 'c1', name: '계약 중', color: '#4f7cff' },
@@ -899,22 +900,45 @@ let selectedLogType = null;
 let currentColorTarget = null;
 let map = null;
 
-function loadData() {
+async function loadData() {
   try {
+    const res = await fetch(SHEET_URL + '?action=getAll');
+    const data = await res.json();
+    customers = data.customers || [];
+    categories = data.categories && data.categories.length > 0 ? data.categories : DEFAULT_CATEGORIES;
+  } catch(e) {
+    // 오프라인 fallback
     customers = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
     categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
-  } catch(e) {
-    customers = [];
-    categories = DEFAULT_CATEGORIES;
+    showToast('오프라인 모드 - 로컬 데이터 사용 중');
   }
 }
 
-function saveData() {
+async function saveData() {
+  // 로컬 백업
   localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
+  localStorage.setItem(CAT_KEY, JSON.stringify(categories));
+  // 구글 시트 저장
+  try {
+    await fetch(SHEET_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'save', customers, categories })
+    });
+  } catch(e) {
+    showToast('저장 실패 - 로컬에만 저장됨');
+  }
 }
 
-function saveCats() {
+async function saveCats() {
   localStorage.setItem(CAT_KEY, JSON.stringify(categories));
+  try {
+    await fetch(SHEET_URL, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'save', customers, categories })
+    });
+  } catch(e) {
+    showToast('저장 실패 - 로컬에만 저장됨');
+  }
 }
 
 // ==================== PIN ====================
@@ -1905,9 +1929,10 @@ async function drawRouteFromOrigin(origin) {
 }
 
 // ==================== INIT ====================
-window.addEventListener("load", () => {
-  loadData();
+window.addEventListener("load", async () => {
   checkLock();
+  showToast('데이터 불러오는 중...');
+  await loadData();
   kakao.maps.load(() => {
     initMap();
     renderLegend();

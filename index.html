@@ -1063,6 +1063,7 @@ function initMap() {
       const latlng = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
       map.setCenter(latlng);
       updateMyLocation(latlng);
+      setTimeout(() => kakao.maps.event.trigger(map, 'resize'), 300);
     }, null, { enableHighAccuracy: true });
 
     // 실시간 추적

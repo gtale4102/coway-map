@@ -694,10 +694,10 @@
       <span class="legend-dot" style="background:var(--text2)"></span>전체
     </div>
     <div class="legend-chip inactive" id="owner-me" onclick="setOwnerFilter('me')" style="border-color:var(--accent); color:var(--accent);">
-      <span class="legend-dot" style="background:var(--accent)"></span><span id="owner-me-label">김태일</span>
+      <span class="legend-dot" style="background:var(--accent)"></span><span id="owner-me-label">나</span>
     </div>
-    <div class="legend-chip inactive" id="owner-partner" onclick="setOwnerFilter('partner')" style="border-color:var(--accent2); color:var(--accent2);">
-      <span class="legend-dot" style="background:var(--accent2)"></span>정열
+    <div class="legend-chip inactive" id="owner-partner" onclick="setOwnerFilter('partner')" style="border-color:#00d4ff; color:#00d4ff;">
+      <span class="legend-dot" style="background:#00d4ff"></span><span id="owner-partner-label">상대방</span>
     </div>
   </div>
   <div class="legend-bar" id="legend-bar"></div>
@@ -905,7 +905,7 @@ const STORAGE_KEY = 'coway_customers_v1';
 const CAT_KEY = 'coway_categories_v1';
 const PIN_KEY = 'coway_pin_v1';
 const PIN_ON_KEY = 'coway_pin_on_v1';
-const USER_KEY = 'coway_user_v1';
+const USER_KEY = 'coway_user_v2';
 const SHEET_URL = 'https://script.google.com/macros/s/AKfycbw2Sk9CRyl2klNZy__zOAQjSuXV9nRHT2gkarjZ91Lcx0AsWsn4FMWiieBgIoWsMbfSrA/exec';
 
 const DEFAULT_CATEGORIES = [
@@ -1033,16 +1033,13 @@ function selectUser(name) {
     document.getElementById('lock-screen').style.display = 'flex';
     document.getElementById('main-ui').style.display = 'none';
   }
-  // 내 것 레이블 업데이트
+  // 레이블 업데이트
   updateOwnerLabel();
   // 소유자 필터 기본값 내 것으로
   setOwnerFilter('me');
 }
 
-function updateOwnerLabel() {
-  const label = document.getElementById('owner-me-label');
-  if (label) label.textContent = currentUser === '태일' ? '김태일' : currentUser;
-}
+
 
 function setOwnerFilter(filter) {
   ownerFilter = filter;
@@ -1773,6 +1770,13 @@ function closeAllSheets() {
 }
 
 // ==================== EXPORT/IMPORT ====================
+function updateOwnerLabel() {
+  const meLabel = document.getElementById('owner-me-label');
+  const partnerLabel = document.getElementById('owner-partner-label');
+  if (meLabel) meLabel.textContent = currentUser === '태일' ? '김태일' : currentUser;
+  if (partnerLabel) partnerLabel.textContent = currentUser === '태일' ? '정열' : '김태일';
+}
+
 function changeUser() {
   localStorage.removeItem(USER_KEY);
   currentUser = '';

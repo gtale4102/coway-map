@@ -2046,6 +2046,7 @@ async function drawRouteFromOrigin(origin) {
     const bounds = new kakao.maps.LatLngBounds();
     allPoints.forEach(p => bounds.extend(p));
     map.setBounds(bounds);
+    setTimeout(() => kakao.maps.event.trigger(map, 'resize'), 200);
   }
 
   // 패널 구간 시간 갱신

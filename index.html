@@ -720,8 +720,13 @@
       <div style="padding:8px; border-bottom:1px solid var(--border); flex-shrink:0;">
         <div style="font-size:11px; color:var(--text2); margin-bottom:4px; font-weight:600;">출발지</div>
         <div style="display:flex; gap:6px;">
-          <button id="origin-gps-btn" class="quick-log-btn selected-call" style="flex:1; padding:8px; font-size:12px;" onclick="setOriginGPS()">📍 현위치</button>
-          <button id="origin-custom-btn" class="quick-log-btn" style="flex:1; padding:8px; font-size:12px;" onclick="setOriginCustom()">✏️ 직접 입력</button>
+          <button id="origin-gps-btn" class="quick-log-btn selected-call" style="flex:1; padding:8px; font-size:11px;" onclick="setOriginGPS()">📍 현위치</button>
+          <button id="origin-customer-btn" class="quick-log-btn" style="flex:1; padding:8px; font-size:11px;" onclick="setOriginFromCustomer()">🏢 고객사</button>
+          <button id="origin-custom-btn" class="quick-log-btn" style="flex:1; padding:8px; font-size:11px;" onclick="setOriginCustom()">✏️ 직접입력</button>
+        </div>
+        <div id="origin-customer-input" style="display:none; margin-top:6px; position:relative;">
+          <input type="text" class="form-input" id="origin-customer-search" placeholder="고객사 검색..." oninput="filterOriginCustomers()" style="font-size:13px;" autocomplete="off">
+          <div id="origin-customer-results" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); z-index:100; max-height:140px; overflow-y:auto;"></div>
         </div>
         <div id="origin-custom-input" style="display:none; margin-top:6px;">
           <input type="text" class="form-input" id="origin-address" placeholder="출발지 주소 입력" style="font-size:13px;">
@@ -814,11 +819,14 @@
 <div class="bottom-sheet" id="daily-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">오늘 컨택 기록</div>
+    <div class="sheet-title">컨택 기록</div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
-    <div style="font-size:13px; color:var(--text2); margin-bottom:14px;" id="daily-date"></div>
+    <div class="form-group">
+      <label class="form-label">날짜</label>
+      <input type="date" class="form-input" id="daily-date-input" onchange="renderTodayLogs()">
+    </div>
     <div class="form-group">
       <label class="form-label">고객사 검색</label>
       <div style="position:relative;">
@@ -842,7 +850,7 @@
     </div>
     <button class="submit-btn" onclick="submitDailyLog()">기록 저장</button>
 
-    <div class="section-divider" style="margin-top:20px;">오늘 기록된 컨택</div>
+    <div class="section-divider" style="margin-top:20px;" id="today-logs-title">오늘 기록된 컨택</div>
     <div id="today-logs"></div>
   </div>
 </div>
@@ -891,6 +899,17 @@
       </div>
       <button class="submit-btn" onclick="savePin()">PIN 저장</button>
     </div>
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-title">컨택 리마인드 알림</div>
+        <div class="setting-desc">설정한 일수 이상 미컨택 고객사 알림</div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <input type="number" class="form-input" id="settings-remind-days" style="width:60px; padding:6px 8px; font-size:12px;" min="0" max="365" placeholder="0">
+        <span style="font-size:12px;color:var(--text2);">일</span>
+        <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="saveRemindDaysFromSettings()">적용</button>
+      </div>
+    </div>
     <div class="setting-row" style="margin-top:8px;">
       <div class="setting-info">
         <div class="setting-title">데이터 내보내기</div>
@@ -922,7 +941,7 @@
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
-    <div style="display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;">
+    <div style="display:flex; gap:6px; margin-bottom:8px; flex-wrap:wrap;">
       <input type="text" class="form-input" id="history-search" placeholder="고객사 검색..." oninput="renderHistoryBody()" style="flex:1; min-width:120px;">
       <select class="form-select" id="history-type" onchange="renderHistoryBody()" style="width:90px;">
         <option value="all">전체</option>
@@ -930,6 +949,11 @@
         <option value="call">전화</option>
         <option value="sms">문자</option>
       </select>
+    </div>
+    <div style="display:flex; gap:6px; margin-bottom:12px;">
+      <button id="history-sort-date" class="quick-log-btn selected-call" style="flex:1; padding:8px; font-size:12px;" onclick="setHistorySort('date')">📅 날짜순</button>
+      <button id="history-sort-customer" class="quick-log-btn" style="flex:1; padding:8px; font-size:12px;" onclick="setHistorySort('customer')">🏢 고객사순</button>
+      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px; flex-shrink:0;" onclick="exportHistoryPDF()">📄 PDF</button>
     </div>
     <div id="history-body"></div>
   </div>
@@ -1473,13 +1497,11 @@ function moveToMarker(id) {
 
 // ==================== QUICK LOG ====================
 function openQuickLog(id) {
+  const c = customers.find(x => x.id === id);
+  if (!c) return;
   closeAllSheets();
   setTimeout(() => {
-    const sel = document.getElementById('daily-customer');
-    for (let i = 0; i < sel.options.length; i++) {
-      if (sel.options[i].value === id) { sel.selectedIndex = i; break; }
-    }
-    openSheet('daily-sheet');
+    openSheet('daily-sheet', id, c.name);
   }, 200);
 }
 
@@ -1584,13 +1606,18 @@ async function submitForm() {
     if (a) addresses.push({ label: l, address: a });
   });
 
-  // 첫 주소로 좌표 설정
-  let lat = null, lng = null;
+  // 모든 주소 좌표 변환
   if (addresses.length > 0) {
     showToast('주소 변환 중...');
-    const geo = await geocodeAddress(addresses[0].address);
-    if (geo) { lat = geo.lat; lng = geo.lng; }
+    for (let i = 0; i < addresses.length; i++) {
+      const geo = await geocodeAddress(addresses[i].address);
+      if (geo) { addresses[i].lat = geo.lat; addresses[i].lng = geo.lng; }
+    }
   }
+  // 첫 주소 좌표를 대표 좌표로
+  const firstAddr = addresses.find(a => a.lat);
+  const lat = firstAddr ? firstAddr.lat : null;
+  const lng = firstAddr ? firstAddr.lng : null;
 
   const owner = currentUser;
 
@@ -1626,14 +1653,28 @@ function deleteCustomer(id) {
 }
 
 // ==================== DAILY LOG ====================
-function setupDailySheet() {
-  const today = new Date().toLocaleDateString('ko-KR', { year:'numeric', month:'long', day:'numeric', weekday:'long' });
-  document.getElementById('daily-date').textContent = today;
-  // 검색창 초기화
-  document.getElementById('daily-search').value = '';
-  document.getElementById('daily-customer').value = '';
-  document.getElementById('daily-selected').style.display = 'none';
+function setupDailySheet(prefillId, prefillName) {
+  const dateInput = document.getElementById('daily-date-input');
+  if (!dateInput.value) {
+    dateInput.value = new Date().toISOString().slice(0,10);
+  }
+  // 검색창 초기화 또는 프리필
+  if (prefillId) {
+    document.getElementById('daily-search').value = prefillName;
+    document.getElementById('daily-customer').value = prefillId;
+    const sel = document.getElementById('daily-selected');
+    sel.textContent = '✓ ' + prefillName + ' 선택됨';
+    sel.style.display = 'block';
+  } else {
+    document.getElementById('daily-search').value = '';
+    document.getElementById('daily-customer').value = '';
+    document.getElementById('daily-selected').style.display = 'none';
+  }
   document.getElementById('daily-search-results').style.display = 'none';
+  // 컨택 유형 선택 초기화
+  selectedLogType = null;
+  ['visit','call','sms'].forEach(t => document.getElementById('ql-' + t).className = 'quick-log-btn');
+  document.getElementById('daily-memo').value = '';
   renderTodayLogs();
 }
 
@@ -1652,13 +1693,13 @@ function submitDailyLog() {
   if (!selectedLogType) { showToast('컨택 유형을 선택하세요'); return; }
 
   const memo = document.getElementById('daily-memo').value.trim();
-  const today = new Date().toISOString().slice(0, 10);
+  const date = document.getElementById('daily-date-input').value || new Date().toISOString().slice(0, 10);
 
   const idx = customers.findIndex(c => c.id === custId);
   if (idx === -1) return;
 
   if (!customers[idx].logs) customers[idx].logs = [];
-  customers[idx].logs.push({ type: selectedLogType, date: today, memo });
+  customers[idx].logs.push({ type: selectedLogType, date, memo });
 
   saveData();
   document.getElementById('daily-memo').value = '';
@@ -1669,19 +1710,22 @@ function submitDailyLog() {
 }
 
 function renderTodayLogs() {
+  const selDate = document.getElementById('daily-date-input').value || new Date().toISOString().slice(0, 10);
   const today = new Date().toISOString().slice(0, 10);
+  const titleEl = document.getElementById('today-logs-title');
+  if (titleEl) titleEl.textContent = (selDate === today ? '오늘' : selDate) + ' 기록된 컨택';
+
   const container = document.getElementById('today-logs');
-  const todayLogs = [];
+  const dayLogs = [];
   customers.forEach(c => {
-    (c.logs || []).filter(l => l.date === today).forEach(l => {
-      todayLogs.push({ customerName: c.name, ...l });
+    (c.logs || []).filter(l => l.date === selDate).forEach(l => {
+      dayLogs.push({ customerName: c.name, customerId: c.id, ...l });
     });
   });
-  todayLogs.sort((a,b) => 0);
-  if (todayLogs.length === 0) {
-    container.innerHTML = '<div class="empty-state"><div>📋</div>오늘 기록된 컨택이 없습니다</div>';
+  if (dayLogs.length === 0) {
+    container.innerHTML = '<div class="empty-state"><div>📋</div>기록된 컨택이 없습니다</div>';
   } else {
-    container.innerHTML = todayLogs.map(l => `
+    container.innerHTML = dayLogs.map(l => `
       <div class="log-row">
         <span class="log-type-badge log-type-${l.type}">${l.type === 'visit' ? '방문' : l.type === 'call' ? '전화' : '문자'}</span>
         <span class="log-memo" style="font-weight:600;">${l.customerName}</span>
@@ -1857,6 +1901,7 @@ function openSheet(id) {
     document.getElementById('pin-toggle').classList.toggle('on', isOn);
     const label = document.getElementById('current-user-label');
     if (label) label.textContent = currentUser === '태일' ? '김태일' : currentUser || '미설정';
+    document.getElementById('settings-remind-days').value = localStorage.getItem(REMIND_KEY) || '';
   }
 }
 
@@ -1948,10 +1993,18 @@ function selectDailyCustomer(id, name) {
 }
 
 // ==================== HISTORY ====================
-function renderHistoryBody() {
+let historySortMode = 'date';
+
+function setHistorySort(mode) {
+  historySortMode = mode;
+  document.getElementById('history-sort-date').className = 'quick-log-btn' + (mode==='date' ? ' selected-call' : '');
+  document.getElementById('history-sort-customer').className = 'quick-log-btn' + (mode==='customer' ? ' selected-call' : '');
+  renderHistoryBody();
+}
+
+function getFilteredLogs() {
   const q = (document.getElementById('history-search')?.value || '').toLowerCase();
   const typeFilter = document.getElementById('history-type')?.value || 'all';
-  const body = document.getElementById('history-body');
 
   const allLogs = [];
   customers.forEach(c => {
@@ -1961,20 +2014,107 @@ function renderHistoryBody() {
       allLogs.push({ customerName: c.name, customerId: c.id, color: getCategoryColor(c.category), ...l });
     });
   });
-  allLogs.sort((a, b) => b.date.localeCompare(a.date));
+  return allLogs;
+}
+
+function renderHistoryBody() {
+  const body = document.getElementById('history-body');
+  const allLogs = getFilteredLogs();
 
   if (allLogs.length === 0) {
     body.innerHTML = '<div class="empty-state"><div>📭</div>컨택 이력이 없습니다</div>';
     return;
   }
-  body.innerHTML = allLogs.map(l => `
-    <div class="log-row" style="cursor:pointer;" onclick="openDetail('${l.customerId}'); closeSheet('history-sheet');">
-      <span class="log-type-badge log-type-${l.type}">${l.type==='visit'?'방문':l.type==='call'?'전화':'문자'}</span>
-      <span style="font-size:12px;color:var(--text2);white-space:nowrap;">${l.date}</span>
-      <span class="legend-dot" style="background:${l.color};width:8px;height:8px;flex-shrink:0;"></span>
-      <span class="log-memo" style="font-weight:600;">${l.customerName}</span>
-      <span class="log-memo" style="color:var(--text2);">${l.memo||''}</span>
-    </div>`).join('');
+
+  if (historySortMode === 'date') {
+    allLogs.sort((a, b) => b.date.localeCompare(a.date));
+    body.innerHTML = allLogs.map(l => `
+      <div class="log-row" style="cursor:pointer;" onclick="openDetail('${l.customerId}'); closeSheet('history-sheet');">
+        <span class="log-type-badge log-type-${l.type}">${l.type==='visit'?'방문':l.type==='call'?'전화':'문자'}</span>
+        <span style="font-size:12px;color:var(--text2);white-space:nowrap;">${l.date}</span>
+        <span class="legend-dot" style="background:${l.color};width:8px;height:8px;flex-shrink:0;"></span>
+        <span class="log-memo" style="font-weight:600;">${l.customerName}</span>
+        <span class="log-memo" style="color:var(--text2);">${l.memo||''}</span>
+      </div>`).join('');
+  } else {
+    // 고객사순
+    const grouped = {};
+    allLogs.forEach(l => {
+      if (!grouped[l.customerId]) grouped[l.customerId] = { name: l.customerName, color: l.color, logs: [] };
+      grouped[l.customerId].logs.push(l);
+    });
+    const groups = Object.values(grouped).sort((a,b) => a.name.localeCompare(b.name));
+    groups.forEach(g => g.logs.sort((a,b) => b.date.localeCompare(a.date)));
+
+    body.innerHTML = groups.map(g => `
+      <div style="margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer;" onclick="openDetail('${g.logs[0].customerId}'); closeSheet('history-sheet');">
+          <span class="legend-dot" style="background:${g.color};width:10px;height:10px;flex-shrink:0;"></span>
+          <span style="font-weight:700;font-size:14px;">${g.name}</span>
+          <span style="font-size:12px;color:var(--text2);">(${g.logs.length}건)</span>
+        </div>
+        ${g.logs.map(l => `
+          <div class="log-row" style="padding-left:14px;">
+            <span class="log-type-badge log-type-${l.type}">${l.type==='visit'?'방문':l.type==='call'?'전화':'문자'}</span>
+            <span style="font-size:12px;color:var(--text2);white-space:nowrap;">${l.date}</span>
+            <span class="log-memo" style="color:var(--text2);">${l.memo||''}</span>
+          </div>`).join('')}
+      </div>`).join('');
+  }
+}
+
+// PDF 내보내기
+function exportHistoryPDF() {
+  const allLogs = getFilteredLogs();
+  if (allLogs.length === 0) { showToast('내보낼 이력이 없습니다'); return; }
+
+  // 고객사순 그룹화
+  const grouped = {};
+  allLogs.forEach(l => {
+    if (!grouped[l.customerId]) grouped[l.customerId] = { name: l.customerName, color: l.color, logs: [] };
+    grouped[l.customerId].logs.push(l);
+  });
+  const groups = Object.values(grouped).sort((a,b) => a.name.localeCompare(b.name));
+  groups.forEach(g => g.logs.sort((a,b) => b.date.localeCompare(a.date)));
+
+  const typeLabel = { visit: '방문', call: '전화', sms: '문자' };
+  const todayStr = new Date().toLocaleDateString('ko-KR');
+
+  let html = `
+  <html><head><meta charset="utf-8"><style>
+    @page { size: A4; margin: 18mm; }
+    body { font-family: 'Noto Sans CJK KR','Malgun Gothic',sans-serif; color:#222; font-size:11px; }
+    h1 { font-size:18px; margin-bottom:4px; }
+    .meta { color:#888; font-size:11px; margin-bottom:20px; }
+    .company { margin-bottom:14px; page-break-inside:avoid; }
+    .company-name { font-size:13px; font-weight:700; border-bottom:2px solid #333; padding-bottom:4px; margin-bottom:6px; }
+    table { width:100%; border-collapse:collapse; font-size:10px; }
+    th, td { border:1px solid #ddd; padding:4px 8px; text-align:left; }
+    th { background:#f0f0f0; font-weight:700; }
+    .badge { display:inline-block; padding:1px 6px; border-radius:4px; font-size:9px; font-weight:700; }
+    .b-visit { background:#dbe7ff; color:#2952cc; }
+    .b-call { background:#d4f7e6; color:#1f9d63; }
+    .b-sms { background:#fff0d6; color:#cc8a1f; }
+  </style></head><body>
+  <h1>전체 컨택 이력</h1>
+  <div class="meta">출력일: ${todayStr} · 총 ${groups.length}개 고객사 · ${allLogs.length}건</div>
+  `;
+
+  groups.forEach(g => {
+    html += `<div class="company"><div class="company-name">${g.name} (${g.logs.length}건)</div><table>
+      <tr><th style="width:80px;">날짜</th><th style="width:60px;">유형</th><th>메모</th></tr>`;
+    g.logs.forEach(l => {
+      html += `<tr><td>${l.date}</td><td><span class="badge b-${l.type}">${typeLabel[l.type]}</span></td><td>${l.memo||''}</td></tr>`;
+    });
+    html += `</table></div>`;
+  });
+
+  html += `</body></html>`;
+
+  const printWindow = window.open('', '_blank');
+  printWindow.document.write(html);
+  printWindow.document.close();
+  setTimeout(() => { printWindow.print(); }, 300);
 }
 
 // ==================== REMIND ====================
@@ -1987,6 +2127,15 @@ function checkOverdue(c, days) {
   const today = new Date();
   const diff = Math.floor((today - lastDate) / (1000*60*60*24));
   return diff >= days;
+}
+
+function saveRemindDaysFromSettings() {
+  const days = document.getElementById('settings-remind-days').value || '0';
+  localStorage.setItem(REMIND_KEY, days);
+  renderAllMarkers();
+  if (parseInt(days) > 0) renderRemindList();
+  else document.getElementById('remind-banner').style.display = 'none';
+  showToast(days === '0' ? '리마인드 알림이 해제되었습니다' : days + '일 기준 적용됨');
 }
 
 function saveRemindDays() {
@@ -2040,17 +2189,64 @@ let routeTimeOverlays = [];
 let routeSegmentTimes = [];
 let customOrigin = null; // null = 현위치 사용
 
+function resetOriginButtons() {
+  document.getElementById('origin-gps-btn').className = 'quick-log-btn';
+  document.getElementById('origin-customer-btn').className = 'quick-log-btn';
+  document.getElementById('origin-custom-btn').className = 'quick-log-btn';
+  document.getElementById('origin-customer-input').style.display = 'none';
+  document.getElementById('origin-custom-input').style.display = 'none';
+}
+
 function setOriginGPS() {
   customOrigin = null;
+  resetOriginButtons();
   document.getElementById('origin-gps-btn').className = 'quick-log-btn selected-call';
-  document.getElementById('origin-custom-btn').className = 'quick-log-btn';
-  document.getElementById('origin-custom-input').style.display = 'none';
   document.getElementById('origin-label').textContent = '현재 위치 사용';
   document.getElementById('origin-label').style.color = 'var(--success)';
 }
 
+function setOriginFromCustomer() {
+  resetOriginButtons();
+  document.getElementById('origin-customer-btn').className = 'quick-log-btn selected-sms';
+  document.getElementById('origin-customer-input').style.display = 'block';
+  document.getElementById('origin-customer-search').value = '';
+}
+
+function filterOriginCustomers() {
+  const q = document.getElementById('origin-customer-search').value.toLowerCase();
+  const results = document.getElementById('origin-customer-results');
+  if (!q) { results.style.display = 'none'; return; }
+
+  const matches = [];
+  customers.forEach(c => {
+    if (!c.name.toLowerCase().includes(q)) return;
+    (c.addresses || []).forEach(a => {
+      if (a.lat && a.lng) {
+        matches.push({ name: c.name, label: a.label, lat: a.lat, lng: a.lng });
+      }
+    });
+  });
+
+  if (matches.length === 0) { results.style.display = 'none'; return; }
+  results.innerHTML = matches.slice(0,8).map((m,i) => `
+    <div style="padding:10px 12px; cursor:pointer; font-size:13px; border-bottom:1px solid var(--border);"
+      onmousedown="selectOriginCustomer(${m.lat}, ${m.lng}, '${(m.name + (m.label?' ('+m.label+')':'')).replace(/'/g,"\'")}')">
+      ${m.name}${m.label ? ' <span style="color:var(--text2);font-size:11px;">('+m.label+')</span>' : ''}
+    </div>`).join('');
+  results.style.display = 'block';
+}
+
+function selectOriginCustomer(lat, lng, label) {
+  customOrigin = { lat, lng, label };
+  document.getElementById('origin-customer-search').value = label;
+  document.getElementById('origin-customer-results').style.display = 'none';
+  document.getElementById('origin-label').textContent = '✓ ' + label;
+  document.getElementById('origin-label').style.color = 'var(--accent)';
+  showToast('출발지 설정 완료');
+}
+
 function setOriginCustom() {
-  document.getElementById('origin-gps-btn').className = 'quick-log-btn';
+  resetOriginButtons();
   document.getElementById('origin-custom-btn').className = 'quick-log-btn selected-visit';
   document.getElementById('origin-custom-input').style.display = 'block';
 }

@@ -13,6 +13,7 @@
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>고객사 지도</title>
 <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=1f8090d36c43b8db729e5495eb0a0d59&libraries=services&autoload=false"></script>
+<script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -709,7 +710,7 @@
     </div>
     <button class="fab" onclick="openAddSheet()">＋</button>
     <button class="route-fab" onclick="toggleRoutePanel()" title="동선 짜기">🗺️</button>
-    <button class="daily-btn" onclick="openSheet('daily-sheet')">📋 오늘 기록</button>
+    <button class="daily-btn" onclick="openSheet('daily-sheet')">📋 컨택 기록</button>
 
     <!-- ROUTE PANEL -->
     <div class="route-panel" id="route-panel">
@@ -729,7 +730,7 @@
           <div id="origin-customer-results" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); z-index:100; max-height:140px; overflow-y:auto;"></div>
         </div>
         <div id="origin-custom-input" style="display:none; margin-top:6px;">
-          <input type="text" class="form-input" id="origin-address" placeholder="출발지 주소 입력" style="font-size:13px;">
+          <input type="text" class="form-input" id="origin-address" placeholder="주소 검색을 눌러주세요" readonly style="cursor:pointer; font-size:13px;" onclick="openAddressSearch(this)">
           <button class="add-entry-btn" onclick="applyCustomOrigin()" style="margin-top:4px;">확인</button>
         </div>
         <div id="origin-label" style="font-size:12px; color:var(--success); margin-top:4px;">현재 위치 사용</div>
@@ -1564,12 +1565,24 @@ function addAddressRow(a = {}) {
   wrap.style.marginBottom = '8px';
   wrap.innerHTML = `
     <div class="address-row">
-      <input type="text" class="form-input addr-label" placeholder="구분(본사/지점)" value="${a.label || ''}">
-      <input type="text" class="form-input addr-addr" placeholder="주소 입력" value="${a.address || ''}">
+      <input type="text" class="form-input addr-label" placeholder="구분(본사/지점)" value="${a.label || ''}" style="max-width:90px;">
+      <input type="text" class="form-input addr-addr" placeholder="주소 검색을 눌러주세요" value="${a.address || ''}" readonly style="cursor:pointer;" onclick="openAddressSearch(this)">
       <button class="remove-btn" onclick="this.closest('[style]').remove()">−</button>
     </div>
-    <div class="geocode-status" id="gs-${Date.now()}"></div>`;
+    <div style="display:flex; gap:6px; margin-top:4px;">
+      <button class="add-entry-btn" style="flex:1; margin-top:0; padding:6px;" onclick="openAddressSearch(this.closest('[style]').querySelector('.addr-addr'))">🔍 주소 검색</button>
+      <input type="text" class="form-input addr-detail" placeholder="상세주소(동/호수 등)" value="${a.detail || ''}" style="flex:1.5;">
+    </div>`;
   document.getElementById('f-addresses').appendChild(wrap);
+}
+
+function openAddressSearch(targetInput) {
+  new daum.Postcode({
+    oncomplete: function(data) {
+      const addr = data.roadAddress || data.jibunAddress;
+      targetInput.value = addr;
+    }
+  }).open();
 }
 
 async function geocodeAddress(address) {
@@ -1603,7 +1616,8 @@ async function submitForm() {
   document.querySelectorAll('#f-addresses [style]').forEach(wrap => {
     const l = wrap.querySelector('.addr-label').value.trim();
     const a = wrap.querySelector('.addr-addr').value.trim();
-    if (a) addresses.push({ label: l, address: a });
+    const d = wrap.querySelector('.addr-detail')?.value.trim() || '';
+    if (a) addresses.push({ label: l, address: a, detail: d });
   });
 
   // 모든 주소 좌표 변환
@@ -2063,7 +2077,7 @@ function renderHistoryBody() {
   }
 }
 
-// PDF 내보내기
+// PDF 내보내기 - HTML 파일 다운로드 (인쇄 시 PDF로 저장 가능)
 function exportHistoryPDF() {
   const allLogs = getFilteredLogs();
   if (allLogs.length === 0) { showToast('내보낼 이력이 없습니다'); return; }
@@ -2080,12 +2094,13 @@ function exportHistoryPDF() {
   const typeLabel = { visit: '방문', call: '전화', sms: '문자' };
   const todayStr = new Date().toLocaleDateString('ko-KR');
 
-  let html = `
-  <html><head><meta charset="utf-8"><style>
+  let html = `<!DOCTYPE html>
+  <html><head><meta charset="utf-8"><title>전체 컨택 이력</title><style>
     @page { size: A4; margin: 18mm; }
-    body { font-family: 'Noto Sans CJK KR','Malgun Gothic',sans-serif; color:#222; font-size:11px; }
+    body { font-family: 'Noto Sans CJK KR','Malgun Gothic',sans-serif; color:#222; font-size:11px; padding:16px; }
     h1 { font-size:18px; margin-bottom:4px; }
     .meta { color:#888; font-size:11px; margin-bottom:20px; }
+    .print-btn { background:#4f7cff; color:#fff; border:none; padding:10px 20px; border-radius:6px; font-size:14px; cursor:pointer; margin-bottom:20px; }
     .company { margin-bottom:14px; page-break-inside:avoid; }
     .company-name { font-size:13px; font-weight:700; border-bottom:2px solid #333; padding-bottom:4px; margin-bottom:6px; }
     table { width:100%; border-collapse:collapse; font-size:10px; }
@@ -2095,7 +2110,9 @@ function exportHistoryPDF() {
     .b-visit { background:#dbe7ff; color:#2952cc; }
     .b-call { background:#d4f7e6; color:#1f9d63; }
     .b-sms { background:#fff0d6; color:#cc8a1f; }
+    @media print { .print-btn { display:none; } }
   </style></head><body>
+  <button class="print-btn" onclick="window.print()">🖨️ 인쇄 / PDF로 저장</button>
   <h1>전체 컨택 이력</h1>
   <div class="meta">출력일: ${todayStr} · 총 ${groups.length}개 고객사 · ${allLogs.length}건</div>
   `;
@@ -2111,10 +2128,16 @@ function exportHistoryPDF() {
 
   html += `</body></html>`;
 
-  const printWindow = window.open('', '_blank');
-  printWindow.document.write(html);
-  printWindow.document.close();
-  setTimeout(() => { printWindow.print(); }, 300);
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '컨택이력_' + todayStr.replace(/\. /g,'').replace(/\./g,'') + '.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('파일 다운로드 완료 - 열어서 인쇄/PDF 저장하세요');
 }
 
 // ==================== REMIND ====================

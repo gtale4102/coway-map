@@ -677,6 +677,7 @@
     <div class="topbar-actions">
       <div class="icon-btn" onclick="openSheet('settings-sheet')" title="설정">⚙️</div>
       <div class="icon-btn" onclick="openSheet('category-sheet')" title="분류 관리">🏷️</div>
+      <div class="icon-btn" onclick="openSheet('history-sheet')" title="전체 컨택 이력">📜</div>
       <div class="icon-btn" onclick="openSheet('list-sheet')" title="목록">☰</div>
     </div>
   </div>
@@ -703,6 +704,9 @@
   <div class="legend-bar" id="legend-bar"></div>
 
   <div id="map">
+    <div id="remind-banner" style="display:none; position:absolute; top:10px; left:10px; right:10px; background:rgba(255,79,106,0.95); color:#fff; border-radius:var(--radius-sm); padding:10px 14px; z-index:51; font-size:13px; font-weight:600; cursor:pointer; box-shadow:0 2px 12px rgba(0,0,0,0.3);" onclick="openSheet('remind-sheet')">
+      ⏰ <span id="remind-count"></span>개 고객사 컨택 알림 → 탭해서 확인
+    </div>
     <button class="fab" onclick="openAddSheet()">＋</button>
     <button class="route-fab" onclick="toggleRoutePanel()" title="동선 짜기">🗺️</button>
     <button class="daily-btn" onclick="openSheet('daily-sheet')">📋 오늘 기록</button>
@@ -712,6 +716,18 @@
       <div class="route-panel-header">
         <div class="route-panel-title">🗺️ 동선 짜기</div>
         <button class="route-panel-close" onclick="toggleRoutePanel()">✕</button>
+      </div>
+      <div style="padding:8px; border-bottom:1px solid var(--border); flex-shrink:0;">
+        <div style="font-size:11px; color:var(--text2); margin-bottom:4px; font-weight:600;">출발지</div>
+        <div style="display:flex; gap:6px;">
+          <button id="origin-gps-btn" class="quick-log-btn selected-call" style="flex:1; padding:8px; font-size:12px;" onclick="setOriginGPS()">📍 현위치</button>
+          <button id="origin-custom-btn" class="quick-log-btn" style="flex:1; padding:8px; font-size:12px;" onclick="setOriginCustom()">✏️ 직접 입력</button>
+        </div>
+        <div id="origin-custom-input" style="display:none; margin-top:6px;">
+          <input type="text" class="form-input" id="origin-address" placeholder="출발지 주소 입력" style="font-size:13px;">
+          <button class="add-entry-btn" onclick="applyCustomOrigin()" style="margin-top:4px;">확인</button>
+        </div>
+        <div id="origin-label" style="font-size:12px; color:var(--success); margin-top:4px;">현재 위치 사용</div>
       </div>
       <div class="route-stops" id="route-stops"></div>
       <button class="route-add-btn" onclick="openRouteAddPicker()">+ 경유지 / 목적지 추가</button>
@@ -804,8 +820,13 @@
   <div class="sheet-body">
     <div style="font-size:13px; color:var(--text2); margin-bottom:14px;" id="daily-date"></div>
     <div class="form-group">
-      <label class="form-label">고객사 선택</label>
-      <select class="form-select" id="daily-customer"></select>
+      <label class="form-label">고객사 검색</label>
+      <div style="position:relative;">
+        <input type="text" class="form-input" id="daily-search" placeholder="고객사명 입력..." oninput="filterDailyCustomers()" autocomplete="off">
+        <div id="daily-search-results" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm); z-index:100; max-height:160px; overflow-y:auto;"></div>
+      </div>
+      <input type="hidden" id="daily-customer">
+      <div id="daily-selected" style="margin-top:6px; font-size:13px; color:var(--accent); display:none;"></div>
     </div>
     <div class="form-group">
       <label class="form-label">컨택 유형</label>
@@ -893,6 +914,47 @@
   </div>
 </div>
 
+<!-- 전체 컨택 이력 시트 -->
+<div class="bottom-sheet" id="history-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <div class="sheet-title">📜 전체 컨택 이력</div>
+    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div class="sheet-body">
+    <div style="display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap;">
+      <input type="text" class="form-input" id="history-search" placeholder="고객사 검색..." oninput="renderHistoryBody()" style="flex:1; min-width:120px;">
+      <select class="form-select" id="history-type" onchange="renderHistoryBody()" style="width:90px;">
+        <option value="all">전체</option>
+        <option value="visit">방문</option>
+        <option value="call">전화</option>
+        <option value="sms">문자</option>
+      </select>
+    </div>
+    <div id="history-body"></div>
+  </div>
+</div>
+
+<!-- 리마인드 알림 시트 -->
+<div class="bottom-sheet" id="remind-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <div class="sheet-title">⏰ 컨택 리마인드</div>
+    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div class="sheet-body">
+    <div class="form-group">
+      <label class="form-label">알림 기준 (미컨택 일수)</label>
+      <div style="display:flex; align-items:center; gap:10px;">
+        <input type="number" class="form-input" id="remind-days" value="30" min="1" max="365" style="width:80px;">
+        <span style="font-size:13px; color:var(--text2);">일 이상 컨택 없는 고객사</span>
+        <button class="action-btn primary" style="padding:8px 12px; font-size:12px;" onclick="saveRemindDays()">적용</button>
+      </div>
+    </div>
+    <div id="remind-list"></div>
+  </div>
+</div>
+
 <!-- COLOR PICKER POPUP -->
 <div class="color-picker-popup" id="color-picker"></div>
 
@@ -910,11 +972,13 @@ const SHEET_URL = 'https://script.google.com/macros/s/AKfycbw2Sk9CRyl2klNZy__zOA
 
 const DEFAULT_CATEGORIES = [
   { id: 'c1', name: '계약 중', color: '#4f7cff' },
-  { id: 'c2', name: '잠재 고객', color: '#3dd68c' },
-  { id: 'c3', name: '재계약 예정', color: '#ffb347' },
+  { id: 'c2', name: '잠재 고객', color: '#ff4f6a' },
+  { id: 'c3', name: '재계약 예정', color: '#3dd68c' },
   { id: 'c4', name: '휴면', color: '#8b91b5' },
-  { id: 'c5', name: '대기업', color: '#ff4f6a' },
+  { id: 'c5', name: '대기업', color: '#ffcc00' },
 ];
+
+const REMIND_KEY = 'coway_remind_days_v1';
 
 const PALETTE = [
   '#4f7cff','#7c5cfc','#3dd68c','#ffb347','#ff4f6a',
@@ -1204,22 +1268,44 @@ function renderAllMarkers() {
   markers = {};
 
   customers.forEach(c => {
-    if (!c.lat || !c.lng) return;
     if (activeFilters.size > 0 && !activeFilters.has(c.category)) return;
-    // 소유자 필터
     if (ownerFilter === 'me' && c.owner !== currentUser) return;
     if (ownerFilter === 'partner' && c.owner === currentUser) return;
 
     const color = getCategoryColor(c.category);
-    const markerImg = makeMarkerImage(color);
-    const marker = new kakao.maps.Marker({
-      position: new kakao.maps.LatLng(c.lat, c.lng),
-      image: markerImg,
-      title: c.name
+    const remindDays = parseInt(localStorage.getItem(REMIND_KEY) || '30');
+    const isOverdue = checkOverdue(c, remindDays);
+
+    // 주소별 핀 표시
+    const addrsWithCoords = (c.addresses || []).filter(a => a.lat && a.lng);
+    if (addrsWithCoords.length === 0 && c.lat && c.lng) {
+      // 구버전 호환 - 대표 좌표만 있는 경우
+      addrsWithCoords.push({ lat: c.lat, lng: c.lng, label: '' });
+    }
+
+    addrsWithCoords.forEach((addr, idx) => {
+      const markerImg = makeMarkerImage(isOverdue ? '#ff4f6a' : color);
+      const marker = new kakao.maps.Marker({
+        position: new kakao.maps.LatLng(addr.lat, addr.lng),
+        image: markerImg,
+        title: c.name + (addr.label ? ' (' + addr.label + ')' : '')
+      });
+      marker.setMap(map);
+      kakao.maps.event.addListener(marker, 'click', () => openDetail(c.id));
+      const markerId = c.id + (idx > 0 ? '_' + idx : '');
+      markers[markerId] = marker;
+
+      // 리마인드 표시
+      if (isOverdue) {
+        const badge = new kakao.maps.CustomOverlay({
+          position: new kakao.maps.LatLng(addr.lat, addr.lng),
+          content: '<div style="background:#ff4f6a;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:-38px;margin-left:12px;">!</div>',
+          zIndex: 15
+        });
+        badge.setMap(map);
+        markers[markerId + '_badge'] = badge;
+      }
     });
-    marker.setMap(map);
-    kakao.maps.event.addListener(marker, 'click', () => openDetail(c.id));
-    markers[c.id] = marker;
   });
 }
 
@@ -1543,10 +1629,11 @@ function deleteCustomer(id) {
 function setupDailySheet() {
   const today = new Date().toLocaleDateString('ko-KR', { year:'numeric', month:'long', day:'numeric', weekday:'long' });
   document.getElementById('daily-date').textContent = today;
-
-  const sel = document.getElementById('daily-customer');
-  sel.innerHTML = customers.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-
+  // 검색창 초기화
+  document.getElementById('daily-search').value = '';
+  document.getElementById('daily-customer').value = '';
+  document.getElementById('daily-selected').style.display = 'none';
+  document.getElementById('daily-search-results').style.display = 'none';
   renderTodayLogs();
 }
 
@@ -1675,8 +1762,21 @@ function renderCategoryManager() {
     <div class="category-row" data-idx="${i}">
       <div class="color-swatch" style="background:${cat.color}" onclick="openColorPicker(event, ${i})"></div>
       <input class="category-name-input" value="${cat.name}" onchange="categories[${i}].name = this.value">
+      <div style="display:flex;flex-direction:column;gap:1px;">
+        <button class="remove-btn" style="font-size:11px;color:var(--text2);" onclick="moveCat(${i},-1)">▲</button>
+        <button class="remove-btn" style="font-size:11px;color:var(--text2);" onclick="moveCat(${i},1)">▼</button>
+      </div>
       <button class="remove-btn" onclick="removeCategory(${i})">−</button>
     </div>`).join('');
+}
+
+function moveCat(idx, dir) {
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= categories.length) return;
+  const tmp = categories[idx];
+  categories[idx] = categories[newIdx];
+  categories[newIdx] = tmp;
+  renderCategoryManager();
 }
 
 function addCategory() {
@@ -1750,6 +1850,8 @@ function openSheet(id) {
   if (id === 'list-sheet') renderListBody();
   if (id === 'daily-sheet') setupDailySheet();
   if (id === 'category-sheet') renderCategoryManager();
+  if (id === 'history-sheet') renderHistoryBody();
+  if (id === 'remind-sheet') renderRemindList();
   if (id === 'settings-sheet') {
     const isOn = localStorage.getItem(PIN_ON_KEY) === '1';
     document.getElementById('pin-toggle').classList.toggle('on', isOn);
@@ -1820,12 +1922,154 @@ function showToast(msg) {
   setTimeout(() => t.classList.remove('show'), 2000);
 }
 
+// ==================== DAILY SEARCH ====================
+function filterDailyCustomers() {
+  const q = document.getElementById('daily-search').value.toLowerCase();
+  const results = document.getElementById('daily-search-results');
+  if (!q) { results.style.display = 'none'; return; }
+  const filtered = customers.filter(c => c.name.toLowerCase().includes(q)).slice(0, 8);
+  if (filtered.length === 0) { results.style.display = 'none'; return; }
+  results.innerHTML = filtered.map(c => `
+    <div style="padding:10px 12px; cursor:pointer; font-size:14px; border-bottom:1px solid var(--border);"
+      onmousedown="selectDailyCustomer('${c.id}', '${c.name.replace(/'/g,"\'")}')">
+      <span class="legend-dot" style="background:${getCategoryColor(c.category)};display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;"></span>
+      ${c.name}
+    </div>`).join('');
+  results.style.display = 'block';
+}
+
+function selectDailyCustomer(id, name) {
+  document.getElementById('daily-customer').value = id;
+  document.getElementById('daily-search').value = name;
+  document.getElementById('daily-search-results').style.display = 'none';
+  const sel = document.getElementById('daily-selected');
+  sel.textContent = '✓ ' + name + ' 선택됨';
+  sel.style.display = 'block';
+}
+
+// ==================== HISTORY ====================
+function renderHistoryBody() {
+  const q = (document.getElementById('history-search')?.value || '').toLowerCase();
+  const typeFilter = document.getElementById('history-type')?.value || 'all';
+  const body = document.getElementById('history-body');
+
+  const allLogs = [];
+  customers.forEach(c => {
+    (c.logs || []).forEach(l => {
+      if (typeFilter !== 'all' && l.type !== typeFilter) return;
+      if (q && !c.name.toLowerCase().includes(q)) return;
+      allLogs.push({ customerName: c.name, customerId: c.id, color: getCategoryColor(c.category), ...l });
+    });
+  });
+  allLogs.sort((a, b) => b.date.localeCompare(a.date));
+
+  if (allLogs.length === 0) {
+    body.innerHTML = '<div class="empty-state"><div>📭</div>컨택 이력이 없습니다</div>';
+    return;
+  }
+  body.innerHTML = allLogs.map(l => `
+    <div class="log-row" style="cursor:pointer;" onclick="openDetail('${l.customerId}'); closeSheet('history-sheet');">
+      <span class="log-type-badge log-type-${l.type}">${l.type==='visit'?'방문':l.type==='call'?'전화':'문자'}</span>
+      <span style="font-size:12px;color:var(--text2);white-space:nowrap;">${l.date}</span>
+      <span class="legend-dot" style="background:${l.color};width:8px;height:8px;flex-shrink:0;"></span>
+      <span class="log-memo" style="font-weight:600;">${l.customerName}</span>
+      <span class="log-memo" style="color:var(--text2);">${l.memo||''}</span>
+    </div>`).join('');
+}
+
+// ==================== REMIND ====================
+function checkOverdue(c, days) {
+  if (!days || days <= 0) return false;
+  const logs = c.logs || [];
+  if (logs.length === 0) return false; // 한 번도 컨택 없으면 알림 제외
+  const lastLog = logs.sort((a,b) => b.date.localeCompare(a.date))[0];
+  const lastDate = new Date(lastLog.date);
+  const today = new Date();
+  const diff = Math.floor((today - lastDate) / (1000*60*60*24));
+  return diff >= days;
+}
+
+function saveRemindDays() {
+  const days = document.getElementById('remind-days').value;
+  localStorage.setItem(REMIND_KEY, days);
+  renderRemindList();
+  renderAllMarkers();
+  showToast(days + '일 기준 적용됨');
+}
+
+function renderRemindList() {
+  const days = parseInt(localStorage.getItem(REMIND_KEY) || '30');
+  document.getElementById('remind-days').value = days;
+  const list = document.getElementById('remind-list');
+  const overdue = customers.filter(c => checkOverdue(c, days));
+
+  // 배너 업데이트
+  const banner = document.getElementById('remind-banner');
+  const countEl = document.getElementById('remind-count');
+  if (overdue.length > 0) {
+    banner.style.display = 'block';
+    countEl.textContent = overdue.length;
+  } else {
+    banner.style.display = 'none';
+  }
+
+  if (overdue.length === 0) {
+    list.innerHTML = '<div class="empty-state"><div>✅</div>알림 대상 고객사가 없습니다</div>';
+    return;
+  }
+  list.innerHTML = `<div style="font-size:12px;color:var(--text2);margin-bottom:8px;">${days}일 이상 미컨택 고객사 ${overdue.length}개</div>` +
+    overdue.map(c => {
+      const logs = (c.logs||[]).sort((a,b)=>b.date.localeCompare(a.date));
+      const last = logs[0];
+      const diff = Math.floor((new Date() - new Date(last.date)) / (1000*60*60*24));
+      return `<div class="contact-row" style="cursor:pointer;" onclick="openDetail('${c.id}'); closeSheet('remind-sheet')">
+        <div style="flex:1;">
+          <div style="font-weight:600;font-size:14px;">${c.name}</div>
+          <div style="font-size:12px;color:var(--danger);">마지막 컨택: ${last.date} (${diff}일 전)</div>
+        </div>
+        <span style="color:var(--text2);">›</span>
+      </div>`;
+    }).join('');
+}
+
 // ==================== ROUTE ====================
 let routeStops = [];
 let routePolylines = [];
 let routeMarkers = [];
 let routeTimeOverlays = [];
-let routeSegmentTimes = []; // 구간별 시간(초) 저장
+let routeSegmentTimes = [];
+let customOrigin = null; // null = 현위치 사용
+
+function setOriginGPS() {
+  customOrigin = null;
+  document.getElementById('origin-gps-btn').className = 'quick-log-btn selected-call';
+  document.getElementById('origin-custom-btn').className = 'quick-log-btn';
+  document.getElementById('origin-custom-input').style.display = 'none';
+  document.getElementById('origin-label').textContent = '현재 위치 사용';
+  document.getElementById('origin-label').style.color = 'var(--success)';
+}
+
+function setOriginCustom() {
+  document.getElementById('origin-gps-btn').className = 'quick-log-btn';
+  document.getElementById('origin-custom-btn').className = 'quick-log-btn selected-visit';
+  document.getElementById('origin-custom-input').style.display = 'block';
+}
+
+async function applyCustomOrigin() {
+  const addr = document.getElementById('origin-address').value.trim();
+  if (!addr) return;
+  showToast('주소 변환 중...');
+  const geo = await geocodeAddress(addr);
+  if (geo) {
+    customOrigin = { lat: geo.lat, lng: geo.lng, label: addr };
+    document.getElementById('origin-label').textContent = '✓ ' + addr;
+    document.getElementById('origin-label').style.color = 'var(--accent)';
+    document.getElementById('origin-custom-input').style.display = 'none';
+    showToast('출발지 설정 완료');
+  } else {
+    showToast('주소를 찾을 수 없습니다');
+  }
+} // 구간별 시간(초) 저장
 
 const SEGMENT_COLORS = ['#4f7cff','#ff4f6a','#c77dff','#00d4ff','#ff6b9d','#3dd68c','#f72585','#4cc9f0'];
 
@@ -1945,11 +2189,15 @@ async function calcRoute() {
   clearRouteLines();
   routeSegmentTimes = [];
 
-  navigator.geolocation.getCurrentPosition(async (pos) => {
-    await drawRouteFromOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-  }, async () => {
-    await drawRouteFromOrigin(routeStops[0]);
-  }, { enableHighAccuracy: true, timeout: 5000 });
+  if (customOrigin) {
+    await drawRouteFromOrigin(customOrigin);
+  } else {
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      await drawRouteFromOrigin({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+    }, async () => {
+      await drawRouteFromOrigin(routeStops[0]);
+    }, { enableHighAccuracy: true, timeout: 5000 });
+  }
 }
 
 async function drawRouteFromOrigin(origin) {
@@ -2079,6 +2327,11 @@ window.addEventListener("load", async () => {
     renderLegend();
     updateOwnerLabel();
     if (currentUser) setOwnerFilter('me');
+    // 리마인드 배너 체크
+    setTimeout(() => {
+      const days = parseInt(localStorage.getItem(REMIND_KEY) || '0');
+      if (days > 0) renderRemindList();
+    }, 2000);
   });
 });
 

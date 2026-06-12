@@ -954,7 +954,7 @@
     <div style="display:flex; gap:6px; margin-bottom:12px;">
       <button id="history-sort-date" class="quick-log-btn selected-call" style="flex:1; padding:8px; font-size:12px;" onclick="setHistorySort('date')">📅 날짜순</button>
       <button id="history-sort-customer" class="quick-log-btn" style="flex:1; padding:8px; font-size:12px;" onclick="setHistorySort('customer')">🏢 고객사순</button>
-      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px; flex-shrink:0;" onclick="exportHistoryPDF()">📄 PDF</button>
+      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px; flex-shrink:0;" onclick="openPdfExportOptions()">📄 PDF</button>
     </div>
     <div id="history-body"></div>
   </div>
@@ -978,6 +978,34 @@
     </div>
     <div id="remind-list"></div>
   </div>
+</div>
+
+<!-- PDF EXPORT OPTIONS SHEET -->
+<div class="bottom-sheet" id="pdf-options-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <div class="sheet-title">📄 PDF 내보내기</div>
+    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div class="sheet-body">
+    <div class="form-group">
+      <label class="form-label">정렬 기준</label>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <div class="quick-log-btn selected-call" id="pdf-sort-name" style="text-align:left; padding:12px;" onclick="setPdfSort('name')">🏢 고객사 가나다순</div>
+        <div class="quick-log-btn" id="pdf-sort-overdue" style="text-align:left; padding:12px;" onclick="setPdfSort('overdue')">⏰ 컨택한지 오래된 순</div>
+      </div>
+    </div>
+    <button class="submit-btn" onclick="exportHistoryPDF()">PDF 파일 생성</button>
+  </div>
+</div>
+
+<!-- ADDRESS SEARCH OVERLAY -->
+<div id="address-search-overlay" style="display:none; position:fixed; inset:0; background:var(--bg); z-index:700; flex-direction:column;">
+  <div class="sheet-header" style="border-bottom:1px solid var(--border);">
+    <div class="sheet-title">주소 검색</div>
+    <button class="sheet-close" onclick="closeAddressSearch()">✕</button>
+  </div>
+  <div id="address-search-container" style="flex:1; overflow:hidden;"></div>
 </div>
 
 <!-- COLOR PICKER POPUP -->
@@ -1576,13 +1604,30 @@ function addAddressRow(a = {}) {
   document.getElementById('f-addresses').appendChild(wrap);
 }
 
+let addressSearchTarget = null;
+
 function openAddressSearch(targetInput) {
+  addressSearchTarget = targetInput;
+  const overlay = document.getElementById('address-search-overlay');
+  const container = document.getElementById('address-search-container');
+  container.innerHTML = '';
+  overlay.style.display = 'flex';
+
   new daum.Postcode({
     oncomplete: function(data) {
       const addr = data.roadAddress || data.jibunAddress;
-      targetInput.value = addr;
-    }
-  }).open();
+      if (addressSearchTarget) addressSearchTarget.value = addr;
+      closeAddressSearch();
+    },
+    width: '100%',
+    height: '100%',
+    embed: true
+  }).embed(container);
+}
+
+function closeAddressSearch() {
+  document.getElementById('address-search-overlay').style.display = 'none';
+  addressSearchTarget = null;
 }
 
 async function geocodeAddress(address) {
@@ -2077,10 +2122,23 @@ function renderHistoryBody() {
   }
 }
 
+// PDF 정렬 옵션
+let pdfSortMode = 'name';
+
+function openPdfExportOptions() {
+  openSheet('pdf-options-sheet');
+}
+
+function setPdfSort(mode) {
+  pdfSortMode = mode;
+  document.getElementById('pdf-sort-name').className = 'quick-log-btn' + (mode==='name' ? ' selected-call' : '');
+  document.getElementById('pdf-sort-overdue').className = 'quick-log-btn' + (mode==='overdue' ? ' selected-call' : '');
+}
+
 // PDF 내보내기 - HTML 파일 다운로드 (인쇄 시 PDF로 저장 가능)
 function exportHistoryPDF() {
   const allLogs = getFilteredLogs();
-  if (allLogs.length === 0) { showToast('내보낼 이력이 없습니다'); return; }
+  if (allLogs.length === 0) { showToast('내보낼 이력이 없습니다'); closeAllSheets(); return; }
 
   // 고객사순 그룹화
   const grouped = {};
@@ -2088,8 +2146,18 @@ function exportHistoryPDF() {
     if (!grouped[l.customerId]) grouped[l.customerId] = { name: l.customerName, color: l.color, logs: [] };
     grouped[l.customerId].logs.push(l);
   });
-  const groups = Object.values(grouped).sort((a,b) => a.name.localeCompare(b.name));
+  let groups = Object.values(grouped);
   groups.forEach(g => g.logs.sort((a,b) => b.date.localeCompare(a.date)));
+
+  if (pdfSortMode === 'overdue') {
+    // 마지막 컨택일 오래된 순
+    groups.sort((a,b) => a.logs[0].date.localeCompare(b.logs[0].date));
+  } else {
+    // 가나다순
+    groups.sort((a,b) => a.name.localeCompare(b.name));
+  }
+
+  closeAllSheets();
 
   const typeLabel = { visit: '방문', call: '전화', sms: '문자' };
   const todayStr = new Date().toLocaleDateString('ko-KR');

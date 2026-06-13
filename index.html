@@ -1351,7 +1351,7 @@ function renderAllMarkers() {
     }
 
     addrsWithCoords.forEach((addr, idx) => {
-      const markerImg = makeMarkerImage(isOverdue ? '#ff4f6a' : color);
+      const markerImg = makeMarkerImage(color);
       const marker = new kakao.maps.Marker({
         position: new kakao.maps.LatLng(addr.lat, addr.lng),
         image: markerImg,
@@ -1379,7 +1379,7 @@ function renderAllMarkers() {
       if (isOverdue) {
         const badge = new kakao.maps.CustomOverlay({
           position: new kakao.maps.LatLng(addr.lat, addr.lng),
-          content: '<div style="background:#ff4f6a;color:#fff;border-radius:50%;width:14px;height:14px;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:-38px;margin-left:12px;">!</div>',
+          content: '<div style="background:#ffd60a;color:#1a1d27;border-radius:50%;width:16px;height:16px;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;margin-top:-40px;margin-left:14px;box-shadow:0 0 0 2px #1a1d27;">!</div>',
           zIndex: 15
         });
         badge.setMap(map);

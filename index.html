@@ -708,8 +708,9 @@
   <div class="legend-bar" id="legend-bar"></div>
 
   <div id="map">
-    <div id="remind-banner" style="display:none; position:absolute; top:10px; left:10px; right:10px; background:rgba(255,79,106,0.95); color:#fff; border-radius:var(--radius-sm); padding:10px 14px; z-index:51; font-size:13px; font-weight:600; cursor:pointer; box-shadow:0 2px 12px rgba(0,0,0,0.3);" onclick="openSheet('remind-sheet')">
-      ⏰ <span id="remind-count"></span>개 고객사 컨택 알림 → 탭해서 확인
+    <div id="remind-banner" style="display:none; position:absolute; top:10px; left:10px; right:10px; background:rgba(255,79,106,0.95); color:#fff; border-radius:var(--radius-sm); padding:10px 14px; z-index:51; font-size:13px; font-weight:600; box-shadow:0 2px 12px rgba(0,0,0,0.3); align-items:center; gap:8px;">
+      <div style="flex:1; cursor:pointer;" onclick="openSheet('remind-sheet')">⏰ <span id="remind-count"></span>개 고객사 컨택 알림 → 탭해서 확인</div>
+      <button onclick="hideRemindBanner()" style="background:none; border:none; color:#fff; font-size:16px; cursor:pointer; padding:0 4px; flex-shrink:0;">✕</button>
     </div>
     <button class="fab" onclick="openAddSheet()">＋</button>
     <button class="route-fab" onclick="toggleRoutePanel()" title="동선 짜기">🗺️</button>
@@ -2281,18 +2282,36 @@ function checkOverdue(c, days) {
 function saveRemindDaysFromSettings() {
   const days = document.getElementById('settings-remind-days').value || '0';
   localStorage.setItem(REMIND_KEY, days);
+  remindBannerHiddenThisSession = false;
   renderAllMarkers();
   if (parseInt(days) > 0) renderRemindList();
-  else document.getElementById('remind-banner').style.display = 'none';
+  else { document.getElementById('remind-banner').style.display = 'none'; updateRoutePanelPosition(); }
   showToast(days === '0' ? '리마인드 알림이 해제되었습니다' : days + '일 기준 적용됨');
 }
 
 function saveRemindDays() {
   const days = document.getElementById('remind-days').value;
   localStorage.setItem(REMIND_KEY, days);
+  remindBannerHiddenThisSession = false;
   renderRemindList();
   renderAllMarkers();
   showToast(days + '일 기준 적용됨');
+}
+
+let remindBannerHiddenThisSession = false;
+
+function hideRemindBanner() {
+  remindBannerHiddenThisSession = true;
+  document.getElementById('remind-banner').style.display = 'none';
+  updateRoutePanelPosition();
+}
+
+function updateRoutePanelPosition() {
+  const banner = document.getElementById('remind-banner');
+  const panel = document.getElementById('route-panel');
+  if (!panel) return;
+  const bannerVisible = banner && banner.style.display !== 'none';
+  panel.style.top = bannerVisible ? '54px' : '10px';
 }
 
 function renderRemindList() {
@@ -2304,12 +2323,13 @@ function renderRemindList() {
   // 배너 업데이트
   const banner = document.getElementById('remind-banner');
   const countEl = document.getElementById('remind-count');
-  if (overdue.length > 0) {
-    banner.style.display = 'block';
+  if (overdue.length > 0 && !remindBannerHiddenThisSession) {
+    banner.style.display = 'flex';
     countEl.textContent = overdue.length;
   } else {
     banner.style.display = 'none';
   }
+  updateRoutePanelPosition();
 
   if (overdue.length === 0) {
     list.innerHTML = '<div class="empty-state"><div>✅</div>알림 대상 고객사가 없습니다</div>';

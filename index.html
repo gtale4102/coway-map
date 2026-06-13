@@ -747,11 +747,20 @@
     <!-- ROUTE ADD PICKER -->
     <div class="route-panel" id="route-picker" style="top:auto; bottom:10px; max-height:50vh;">
       <div class="route-panel-header">
-        <div class="route-panel-title">고객사 선택</div>
+        <div class="route-panel-title">경유지/목적지 추가</div>
         <button class="route-panel-close" onclick="closeRoutePicker()">✕</button>
       </div>
-      <div style="padding:8px;">
-        <input type="text" class="form-input" id="route-picker-search" placeholder="검색..." oninput="renderRoutePicker()" style="margin-bottom:8px;">
+      <div style="display:flex; gap:6px; padding:8px 8px 0;">
+        <button id="rp-tab-customer" class="quick-log-btn selected-call" style="flex:1; padding:8px; font-size:12px;" onclick="setRoutePickerTab('customer')">🏢 고객사</button>
+        <button id="rp-tab-address" class="quick-log-btn" style="flex:1; padding:8px; font-size:12px;" onclick="setRoutePickerTab('address')">📍 주소 직접입력</button>
+      </div>
+      <div id="rp-customer-tab" style="padding:8px;">
+        <input type="text" class="form-input" id="route-picker-search" placeholder="고객사 검색..." oninput="renderRoutePicker()" style="margin-bottom:8px;">
+      </div>
+      <div id="rp-address-tab" style="display:none; padding:8px;">
+        <input type="text" class="form-input" id="route-picker-name" placeholder="표시 이름 (예: 점심장소)" style="margin-bottom:6px;">
+        <input type="text" class="form-input" id="route-picker-address" placeholder="주소 검색을 눌러주세요" readonly style="cursor:pointer;" onclick="openAddressSearch(this)">
+        <button class="add-entry-btn" onclick="addRouteStopFromAddress()" style="margin-top:6px;">추가</button>
       </div>
       <div class="route-stops" id="route-picker-list"></div>
     </div>
@@ -2388,8 +2397,38 @@ function toggleRoutePanel() {
 
 function openRouteAddPicker() {
   document.getElementById('route-picker-search').value = '';
+  setRoutePickerTab('customer');
   renderRoutePicker();
   document.getElementById('route-picker').classList.add('open');
+}
+
+function setRoutePickerTab(tab) {
+  document.getElementById('rp-tab-customer').className = 'quick-log-btn' + (tab==='customer' ? ' selected-call' : '');
+  document.getElementById('rp-tab-address').className = 'quick-log-btn' + (tab==='address' ? ' selected-call' : '');
+  document.getElementById('rp-customer-tab').style.display = tab==='customer' ? 'block' : 'none';
+  document.getElementById('rp-address-tab').style.display = tab==='address' ? 'block' : 'none';
+  document.getElementById('route-picker-list').style.display = tab==='customer' ? 'block' : 'none';
+  if (tab === 'address') {
+    document.getElementById('route-picker-name').value = '';
+    document.getElementById('route-picker-address').value = '';
+  }
+}
+
+async function addRouteStopFromAddress() {
+  const name = document.getElementById('route-picker-name').value.trim();
+  const addr = document.getElementById('route-picker-address').value.trim();
+  if (!addr) { showToast('주소를 검색해주세요'); return; }
+
+  showToast('주소 변환 중...');
+  const geo = await geocodeAddress(addr);
+  if (!geo) { showToast('주소를 찾을 수 없습니다'); return; }
+
+  const displayName = name || addr;
+  const stopKey = 'custom_' + Date.now();
+  routeStops.push({ id: stopKey, stopKey, name: displayName, lat: geo.lat, lng: geo.lng });
+  closeRoutePicker();
+  renderRouteStops();
+  clearRouteLines();
 }
 
 function closeRoutePicker() {

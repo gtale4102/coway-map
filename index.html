@@ -1590,15 +1590,16 @@ function addContactRow(ct = {}) {
 
 function addAddressRow(a = {}) {
   const wrap = document.createElement('div');
+  wrap.className = 'addr-wrap';
   wrap.style.marginBottom = '8px';
   wrap.innerHTML = `
     <div class="address-row">
       <input type="text" class="form-input addr-label" placeholder="구분(본사/지점)" value="${a.label || ''}" style="max-width:90px;">
       <input type="text" class="form-input addr-addr" placeholder="주소 검색을 눌러주세요" value="${a.address || ''}" readonly style="cursor:pointer;" onclick="openAddressSearch(this)">
-      <button class="remove-btn" onclick="this.closest('[style]').remove()">−</button>
+      <button class="remove-btn" onclick="this.closest('.addr-wrap').remove()">−</button>
     </div>
     <div style="display:flex; gap:6px; margin-top:4px;">
-      <button class="add-entry-btn" style="flex:1; margin-top:0; padding:6px;" onclick="openAddressSearch(this.closest('[style]').querySelector('.addr-addr'))">🔍 주소 검색</button>
+      <button class="add-entry-btn" style="flex:1; margin-top:0; padding:6px;" onclick="openAddressSearch(this.closest('.addr-wrap').querySelector('.addr-addr'))">🔍 주소 검색</button>
       <input type="text" class="form-input addr-detail" placeholder="상세주소(동/호수 등)" value="${a.detail || ''}" style="flex:1.5;">
     </div>`;
   document.getElementById('f-addresses').appendChild(wrap);
@@ -1658,7 +1659,7 @@ async function submitForm() {
   });
 
   const addresses = [];
-  document.querySelectorAll('#f-addresses [style]').forEach(wrap => {
+  document.querySelectorAll('#f-addresses .addr-wrap').forEach(wrap => {
     const l = wrap.querySelector('.addr-label').value.trim();
     const a = wrap.querySelector('.addr-addr').value.trim();
     const d = wrap.querySelector('.addr-detail')?.value.trim() || '';

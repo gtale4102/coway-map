@@ -2662,7 +2662,7 @@ async function drawRouteFromOrigin(origin) {
   if (!corsError && totalTime > 0) {
     const mins = Math.round(totalTime / 60);
     const km = (totalDist / 1000).toFixed(1);
-    summary.textContent = `총 ${km}km · 약 ${mins}분 (교통 상황 미반영)`;
+    summary.textContent = `총 ${km}km · 약 ${mins}분 (실시간 교통상황 반영)`;
     summary.style.display = 'block';
     showToast('경로 계산 완료');
   } else {

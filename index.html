@@ -1614,16 +1614,22 @@ function openAddressSearch(targetInput) {
   container.innerHTML = '';
   overlay.style.display = 'flex';
 
-  new daum.Postcode({
-    oncomplete: function(data) {
-      const addr = data.roadAddress || data.jibunAddress;
-      if (addressSearchTarget) addressSearchTarget.value = addr;
-      closeAddressSearch();
-    },
-    width: '100%',
-    height: '100%',
-    embed: true
-  }).embed(container);
+  try {
+    new daum.Postcode({
+      oncomplete: function(data) {
+        const addr = data.roadAddress || data.jibunAddress;
+        if (addressSearchTarget) addressSearchTarget.value = addr;
+        closeAddressSearch();
+      },
+      width: '100%',
+      height: '100%',
+      embed: true
+    }).embed(container);
+  } catch(err) {
+    console.error('address search error', err);
+    showToast('주소 검색을 불러올 수 없습니다');
+    closeAddressSearch();
+  }
 }
 
 function closeAddressSearch() {
@@ -1645,61 +1651,70 @@ async function geocodeAddress(address) {
 }
 
 async function submitForm() {
-  const name = document.getElementById('f-name').value.trim();
-  if (!name) { showToast('고객사명을 입력하세요'); return; }
+  try {
+    const name = document.getElementById('f-name').value.trim();
+    if (!name) { showToast('고객사명을 입력하세요'); return; }
 
-  const category = document.getElementById('f-category').value;
-  const memo = document.getElementById('f-memo').value.trim();
+    const category = document.getElementById('f-category').value;
+    const memo = document.getElementById('f-memo').value.trim();
 
-  const contacts = [];
-  document.querySelectorAll('#f-contacts .multi-entry-row').forEach(row => {
-    const n = row.querySelector('.ct-name').value.trim();
-    const p = row.querySelector('.ct-phone').value.trim();
-    if (n || p) contacts.push({ name: n, phone: p });
-  });
-
-  const addresses = [];
-  document.querySelectorAll('#f-addresses .addr-wrap').forEach(wrap => {
-    const l = wrap.querySelector('.addr-label').value.trim();
-    const a = wrap.querySelector('.addr-addr').value.trim();
-    const d = wrap.querySelector('.addr-detail')?.value.trim() || '';
-    if (a) addresses.push({ label: l, address: a, detail: d });
-  });
-
-  // 모든 주소 좌표 변환
-  if (addresses.length > 0) {
-    showToast('주소 변환 중...');
-    for (let i = 0; i < addresses.length; i++) {
-      const geo = await geocodeAddress(addresses[i].address);
-      if (geo) { addresses[i].lat = geo.lat; addresses[i].lng = geo.lng; }
-    }
-  }
-  // 첫 주소 좌표를 대표 좌표로
-  const firstAddr = addresses.find(a => a.lat);
-  const lat = firstAddr ? firstAddr.lat : null;
-  const lng = firstAddr ? firstAddr.lng : null;
-
-  const owner = currentUser;
-
-  if (editingCustomerId) {
-    const idx = customers.findIndex(c => c.id === editingCustomerId);
-    if (idx !== -1) {
-      customers[idx] = { ...customers[idx], name, category, memo, contacts, addresses, lat, lng, owner };
-    }
-  } else {
-    customers.push({
-      id: 'cst_' + Date.now(),
-      name, category, memo, contacts, addresses, lat, lng, owner,
-      logs: [],
-      createdAt: new Date().toISOString()
+    const contacts = [];
+    document.querySelectorAll('#f-contacts .multi-entry-row').forEach(row => {
+      const n = row.querySelector('.ct-name').value.trim();
+      const p = row.querySelector('.ct-phone').value.trim();
+      if (n || p) contacts.push({ name: n, phone: p });
     });
-  }
 
-  saveData();
-  renderAllMarkers();
-  renderListBody();
-  closeAllSheets();
-  showToast(editingCustomerId ? '수정되었습니다' : '고객사가 추가되었습니다');
+    const addresses = [];
+    document.querySelectorAll('#f-addresses .addr-wrap').forEach(wrap => {
+      const l = wrap.querySelector('.addr-label').value.trim();
+      const a = wrap.querySelector('.addr-addr').value.trim();
+      const d = wrap.querySelector('.addr-detail')?.value.trim() || '';
+      if (a) addresses.push({ label: l, address: a, detail: d });
+    });
+
+    // 모든 주소 좌표 변환 (실패해도 저장은 계속 진행)
+    if (addresses.length > 0) {
+      showToast('주소 변환 중...');
+      for (let i = 0; i < addresses.length; i++) {
+        try {
+          const geo = await geocodeAddress(addresses[i].address);
+          if (geo) { addresses[i].lat = geo.lat; addresses[i].lng = geo.lng; }
+        } catch(geoErr) {
+          console.error('geocode error', geoErr);
+        }
+      }
+    }
+    // 첫 주소 좌표를 대표 좌표로
+    const firstAddr = addresses.find(a => a.lat);
+    const lat = firstAddr ? firstAddr.lat : null;
+    const lng = firstAddr ? firstAddr.lng : null;
+
+    const owner = currentUser;
+
+    if (editingCustomerId) {
+      const idx = customers.findIndex(c => c.id === editingCustomerId);
+      if (idx !== -1) {
+        customers[idx] = { ...customers[idx], name, category, memo, contacts, addresses, lat, lng, owner };
+      }
+    } else {
+      customers.push({
+        id: 'cst_' + Date.now(),
+        name, category, memo, contacts, addresses, lat, lng, owner,
+        logs: [],
+        createdAt: new Date().toISOString()
+      });
+    }
+
+    await saveData();
+    renderAllMarkers();
+    renderListBody();
+    closeAllSheets();
+    showToast(editingCustomerId ? '수정되었습니다' : '고객사가 추가되었습니다');
+  } catch(err) {
+    console.error('submitForm error', err);
+    showToast('저장 오류: ' + err.message);
+  }
 }
 
 function deleteCustomer(id) {
@@ -2384,27 +2399,46 @@ function closeRoutePicker() {
 function renderRoutePicker() {
   const q = document.getElementById('route-picker-search').value.toLowerCase();
   const list = document.getElementById('route-picker-list');
-  const filtered = customers.filter(c => c.lat && c.lng && c.name.toLowerCase().includes(q));
-  if (filtered.length === 0) {
+
+  // 좌표 있는 주소를 가진 고객사만, 각 주소별로 항목 생성
+  const items = [];
+  customers.forEach(c => {
+    if (!c.name.toLowerCase().includes(q)) return;
+    const addrs = (c.addresses || []).filter(a => a.lat && a.lng);
+    if (addrs.length > 0) {
+      addrs.forEach((a, idx) => {
+        items.push({ custId: c.id, addrIdx: idx, name: c.name, label: a.label, lat: a.lat, lng: a.lng, category: c.category });
+      });
+    } else if (c.lat && c.lng) {
+      // 구버전 호환
+      items.push({ custId: c.id, addrIdx: 0, name: c.name, label: '', lat: c.lat, lng: c.lng, category: c.category });
+    }
+  });
+
+  if (items.length === 0) {
     list.innerHTML = '<div class="empty-state"><div>📭</div>좌표가 등록된 고객사가 없습니다</div>';
     return;
   }
-  list.innerHTML = filtered.map(c => `
-    <div class="route-stop-row" style="cursor:pointer;" onclick="addRouteStop('${c.id}')">
-      <span class="legend-dot" style="background:${getCategoryColor(c.category)};width:10px;height:10px;flex-shrink:0;"></span>
-      <span class="route-stop-name">${c.name}</span>
-      <span style="font-size:11px;color:var(--success);">${routeStops.find(r=>r.id===c.id)?'✓':''}</span>
-    </div>`).join('');
+
+  list.innerHTML = items.map(item => {
+    const stopKey = item.custId + '_' + item.addrIdx;
+    const displayName = item.name + (item.label ? ' (' + item.label + ')' : '');
+    return `
+    <div class="route-stop-row" style="cursor:pointer;" onclick="addRouteStop('${item.custId}', ${item.addrIdx}, '${item.lat}', '${item.lng}', '${displayName.replace(/'/g,"\'")}')">
+      <span class="legend-dot" style="background:${getCategoryColor(item.category)};width:10px;height:10px;flex-shrink:0;"></span>
+      <span class="route-stop-name">${displayName}</span>
+      <span style="font-size:11px;color:var(--success);">${routeStops.find(r=>r.stopKey===stopKey)?'✓':''}</span>
+    </div>`;
+  }).join('');
 }
 
-function addRouteStop(custId) {
-  const c = customers.find(x => x.id === custId);
-  if (!c || !c.lat) return;
-  if (routeStops.find(r => r.id === custId)) {
-    showToast('이미 추가된 고객사입니다');
+function addRouteStop(custId, addrIdx, lat, lng, displayName) {
+  const stopKey = custId + '_' + addrIdx;
+  if (routeStops.find(r => r.stopKey === stopKey)) {
+    showToast('이미 추가된 위치입니다');
     return;
   }
-  routeStops.push({ id: custId, name: c.name, lat: c.lat, lng: c.lng });
+  routeStops.push({ id: custId, stopKey, name: displayName, lat: parseFloat(lat), lng: parseFloat(lng) });
   closeRoutePicker();
   renderRouteStops();
   clearRouteLines();

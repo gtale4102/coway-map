@@ -1058,6 +1058,7 @@ let markers = {};
 let activeFilters = new Set();
 let ownerFilter = 'all';
 let showLabels = localStorage.getItem('coway_show_labels_v1') === '1';
+let isMobile = false;
 let currentUser = '';
 let editingCustomerId = null;
 let selectedLogType = null;
@@ -1257,7 +1258,7 @@ function initMap() {
   map = new kakao.maps.Map(container, options);
 
   // 모바일/PC 구분
-  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   if (navigator.geolocation && isMobile) {
     // 모바일: 실시간 현위치 추적
@@ -2346,6 +2347,10 @@ function resetOriginButtons() {
 }
 
 function setOriginGPS() {
+  if (!isMobile) {
+    showToast('PC에서는 현위치를 사용할 수 없습니다');
+    return;
+  }
   customOrigin = null;
   resetOriginButtons();
   document.getElementById('origin-gps-btn').className = 'quick-log-btn selected-call';
@@ -2424,7 +2429,26 @@ function getSegmentColor(i) {
 function toggleRoutePanel() {
   const panel = document.getElementById('route-panel');
   panel.classList.toggle('open');
-  if (panel.classList.contains('open')) renderRouteStops();
+  if (panel.classList.contains('open')) {
+    renderRouteStops();
+    const gpsBtn = document.getElementById('origin-gps-btn');
+    if (!isMobile) {
+      gpsBtn.disabled = true;
+      gpsBtn.style.opacity = '0.4';
+      gpsBtn.style.cursor = 'not-allowed';
+      gpsBtn.title = 'PC에서는 현위치 정확도가 낮아 사용할 수 없습니다';
+      if (customOrigin === null) {
+        // PC 첫 진입 시 자동으로 직접입력 탭으로 전환 권장 안내만 표시
+        document.getElementById('origin-label').textContent = 'PC에서는 현위치를 사용할 수 없습니다. 고객사 또는 직접입력을 선택하세요';
+        document.getElementById('origin-label').style.color = 'var(--warning)';
+      }
+    } else {
+      gpsBtn.disabled = false;
+      gpsBtn.style.opacity = '1';
+      gpsBtn.style.cursor = 'pointer';
+      gpsBtn.title = '';
+    }
+  }
 }
 
 function openRouteAddPicker() {
@@ -2613,6 +2637,12 @@ function clearRouteLines() {
 
 async function calcRoute() {
   if (routeStops.length < 2) { showToast('최소 2곳 이상 추가하세요'); return; }
+
+  if (!customOrigin && !isMobile) {
+    showToast('PC에서는 출발지를 직접 선택해주세요');
+    return;
+  }
+
   showToast('경로 계산 중...');
   clearRouteLines();
   routeSegmentTimes = [];

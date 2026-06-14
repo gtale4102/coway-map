@@ -1041,32 +1041,32 @@ const SHEET_URL = 'https://script.google.com/macros/s/AKfycbw2Sk9CRyl2klNZy__zOA
 const SHEET_TOKEN = '4bd56f919030455fc8d6646a2fa703c1';
 
 const DEFAULT_CATEGORIES = [
-  { id: 'c1', name: '계약 중', color: '#4f7cff' },    // 파랑
-  { id: 'c2', name: '잠재 고객', color: '#2ecc71' },  // 초록
-  { id: 'c3', name: '재계약 예정', color: '#f39c12' }, // 주황
-  { id: 'c4', name: '휴면', color: '#607d8b' },        // 회청
-  { id: 'c5', name: '대기업', color: '#e91e63' },      // 핫핑크
+  { id: 'c1', name: '계약 중', color: '#2563eb' },    // 파랑
+  { id: 'c2', name: '잠재 고객', color: '#16a34a' },  // 초록
+  { id: 'c3', name: '재계약 예정', color: '#ca8a04' }, // 황금색
+  { id: 'c4', name: '휴면', color: '#64748b' },        // 회색
+  { id: 'c5', name: '대기업', color: '#dc2626' },      // 빨강
 ];
 
 const REMIND_KEY = 'coway_remind_days_v1';
 const ROUTE_HIST_KEY = 'coway_route_history_v1';
 
 const PALETTE = [
-  '#4f7cff', // 파랑
-  '#ff4f4f', // 빨강
-  '#2ecc71', // 초록
-  '#f39c12', // 주황
-  '#9b59b6', // 보라
-  '#00bcd4', // 청록
-  '#e91e63', // 핫핑크
+  '#2563eb', // 파랑
+  '#dc2626', // 빨강
+  '#16a34a', // 초록
+  '#ca8a04', // 황금색
+  '#7c3aed', // 보라
+  '#0891b2', // 하늘(청록)
+  '#db2777', // 분홍
+  '#ea580c', // 주황
+  '#64748b', // 회색
   '#ffffff',  // 흰색
-  '#ff9800', // 진한 주황
-  '#1abc9c', // 민트
-  '#e74c3c', // 진한 빨강
-  '#3498db', // 하늘
-  '#8bc34a', // 연두
-  '#ff5722', // 주홍
-  '#607d8b', // 회청
+  '#854d0e', // 갈색
+  '#065f46', // 진초록
+  '#1e1b4b', // 남색
+  '#831843', // 자주
+  '#78350f', // 진갈색
 ];
 
 let customers = [];
@@ -2888,8 +2888,8 @@ window.addEventListener("load", async () => {
   currentUser = localStorage.getItem(USER_KEY) || '';
   checkUser();
   checkLock();
-
-  // 지도 먼저 초기화 (데이터 로딩과 병렬로)
+  showToast('데이터 불러오는 중...');
+  await loadData();
   kakao.maps.load(() => {
     initMap();
     renderLegend();
@@ -2899,23 +2899,11 @@ window.addEventListener("load", async () => {
       const btn = document.getElementById('label-toggle');
       if (btn) { btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)'; }
     }
+    setTimeout(() => {
+      const days = parseInt(localStorage.getItem(REMIND_KEY) || '0');
+      if (days > 0) renderRemindList();
+    }, 1000);
   });
-
-  // 데이터 로딩은 별도로 (지도 초기화를 막지 않음)
-  showToast('데이터 불러오는 중...');
-  await loadData();
-
-  // 데이터 로딩 완료 후 마커/레전드 갱신
-  if (map) {
-    renderAllMarkers();
-    renderLegend();
-  }
-
-  // 리마인드 배너 체크
-  setTimeout(() => {
-    const days = parseInt(localStorage.getItem(REMIND_KEY) || '0');
-    if (days > 0) renderRemindList();
-  }, 500);
 });
 
 // 창 크기 변경 시 지도 재조정

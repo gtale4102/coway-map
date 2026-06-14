@@ -2695,14 +2695,15 @@ async function calcRoute() {
 }
 
 function saveCurrentRouteToHistory() {
+  const originLabel = customOrigin ? (customOrigin.label || '출발지') : '현위치';
+  const stopsLabel = routeStops.map(s => s.name).join(' → ');
   const entry = {
     id: 'rh_' + Date.now(),
     stops: JSON.parse(JSON.stringify(routeStops)),
     origin: customOrigin ? JSON.parse(JSON.stringify(customOrigin)) : null,
-    label: routeStops.map(s => s.name).join(' → '),
+    label: originLabel + ' → ' + stopsLabel,
     savedAt: new Date().toISOString()
   };
-  // 동일한 경로(같은 stop 이름 조합)면 기존 항목 제거 후 맨 앞에 추가
   routeHistory = routeHistory.filter(h => h.label !== entry.label);
   routeHistory.unshift(entry);
   if (routeHistory.length > 10) routeHistory = routeHistory.slice(0, 10);

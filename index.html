@@ -1064,7 +1064,7 @@ let markers = {};
 let activeFilters = new Set();
 let ownerFilter = 'all';
 let showLabels = localStorage.getItem('coway_show_labels_v1') === '1';
-let isMobile = false;
+let isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 let currentUser = '';
 let editingCustomerId = null;
 let selectedLogType = null;
@@ -1274,8 +1274,6 @@ function initMap() {
   map = new kakao.maps.Map(container, options);
 
   // 모바일/PC 구분
-  isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-
   if (navigator.geolocation && isMobile) {
     // 모바일: 실시간 현위치 추적
     navigator.geolocation.getCurrentPosition(pos => {

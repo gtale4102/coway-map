@@ -2903,6 +2903,15 @@ window.addEventListener('resize', () => {
     kakao.maps.event.trigger(map, 'resize');
   }
 });
+
+// 백그라운드에서 돌아올 때 지도 재조정
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && map) {
+    setTimeout(() => {
+      kakao.maps.event.trigger(map, 'resize');
+    }, 300);
+  }
+});
 </script>
 </body>
 </html>

@@ -647,12 +647,14 @@
 <div id="lock-screen" style="display:none;">
   <div style="font-size:40px;">🔒</div>
   <h2>고객사 지도</h2>
-  <p>PIN을 입력하세요</p>
+  <p>6자리 PIN을 입력하세요</p>
   <div class="pin-dots" id="pin-dots">
     <div class="pin-dot" id="d0"></div>
     <div class="pin-dot" id="d1"></div>
     <div class="pin-dot" id="d2"></div>
     <div class="pin-dot" id="d3"></div>
+    <div class="pin-dot" id="d4"></div>
+    <div class="pin-dot" id="d5"></div>
   </div>
   <div class="pin-error" id="pin-error"></div>
   <div class="pin-pad">
@@ -909,8 +911,8 @@
     </div>
     <div id="pin-setup-area" style="display:none;">
       <div class="form-group" style="margin-top:14px;">
-        <label class="form-label">PIN 번호 설정 (4자리)</label>
-        <input type="password" class="form-input" id="new-pin" maxlength="4" inputmode="numeric" placeholder="숫자 4자리">
+        <label class="form-label">PIN 번호 설정 (6자리)</label>
+        <input type="password" class="form-input" id="new-pin" maxlength="6" inputmode="numeric" placeholder="숫자 6자리">
       </div>
       <button class="submit-btn" onclick="savePin()">PIN 저장</button>
     </div>
@@ -1222,14 +1224,14 @@ function pinInput(val) {
     }
     return;
   } else {
-    if (pinBuffer.length >= 4) return;
+    if (pinBuffer.length >= 6) return;
     pinBuffer += val;
   }
   updatePinDots();
 }
 
 function updatePinDots() {
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     const d = document.getElementById('d' + i);
     d.classList.toggle('filled', i < pinBuffer.length);
   }
@@ -1249,7 +1251,7 @@ function togglePin() {
 
 function savePin() {
   const val = document.getElementById('new-pin').value;
-  if (!/^\d{4}$/.test(val)) { showToast('숫자 4자리를 입력하세요'); return; }
+  if (!/^\d{6}$/.test(val)) { showToast('숫자 6자리를 입력하세요'); return; }
   localStorage.setItem(PIN_KEY, val);
   localStorage.setItem(PIN_ON_KEY, '1');
   document.getElementById('pin-toggle').classList.add('on');

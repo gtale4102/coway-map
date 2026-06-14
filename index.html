@@ -742,6 +742,7 @@
       <div class="route-stops" id="route-stops"></div>
       <button class="route-add-btn" onclick="openRouteAddPicker()">+ 경유지 / 목적지 추가</button>
       <div class="route-summary" id="route-summary" style="display:none;"></div>
+      <div id="route-history" style="padding:0 8px;"></div>
       <div class="route-actions">
         <button class="action-btn secondary" style="flex:1; padding:8px; font-size:12px;" onclick="clearRoute()">초기화</button>
         <button class="action-btn primary" style="flex:2; padding:8px; font-size:12px;" onclick="calcRoute()">경로 계산</button>
@@ -1046,6 +1047,7 @@ const DEFAULT_CATEGORIES = [
 ];
 
 const REMIND_KEY = 'coway_remind_days_v1';
+const ROUTE_HIST_KEY = 'coway_route_history_v1';
 
 const PALETTE = [
   '#4f7cff','#7c5cfc','#3dd68c','#ffb347','#ff4f6a',
@@ -1055,6 +1057,7 @@ const PALETTE = [
 
 let customers = [];
 let categories = [];
+let routeHistory = [];
 let markers = {};
 let activeFilters = new Set();
 let ownerFilter = 'all';
@@ -1076,6 +1079,7 @@ async function loadData() {
       document.body.removeChild(script);
       customers = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
       categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
+      routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
     }, 8000);
@@ -1086,9 +1090,11 @@ async function loadData() {
       document.body.removeChild(script);
       customers = data.customers || [];
       categories = data.categories && data.categories.length > 0 ? data.categories : DEFAULT_CATEGORIES;
+      routeHistory = data.routeHistory || [];
       // 로컬 백업
       localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
       localStorage.setItem(CAT_KEY, JSON.stringify(categories));
+      localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
       resolve();
     };
 
@@ -1098,6 +1104,7 @@ async function loadData() {
       delete window[cbName];
       customers = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
       categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
+      routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
     };
@@ -1108,6 +1115,12 @@ async function loadData() {
 async function saveData() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
   localStorage.setItem(CAT_KEY, JSON.stringify(categories));
+  localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
+  await saveToSheet();
+}
+
+async function saveRouteHistory() {
+  localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
   await saveToSheet();
 }
 
@@ -1120,7 +1133,7 @@ function saveToSheet() {
   return new Promise((resolve) => {
     const cbName = 'saveCb_' + Date.now();
     const script = document.createElement('script');
-    const data = encodeURIComponent(JSON.stringify({ customers, categories }));
+    const data = encodeURIComponent(JSON.stringify({ customers, categories, routeHistory }));
     const timeout = setTimeout(() => {
       delete window[cbName];
       if (document.body.contains(script)) document.body.removeChild(script);
@@ -2451,6 +2464,7 @@ function toggleRoutePanel() {
   panel.classList.toggle('open');
   if (panel.classList.contains('open')) {
     renderRouteStops();
+    renderRouteHistory();
     const gpsBtn = document.getElementById('origin-gps-btn');
     if (!isMobile) {
       gpsBtn.disabled = true;
@@ -2667,6 +2681,8 @@ async function calcRoute() {
   clearRouteLines();
   routeSegmentTimes = [];
 
+  saveCurrentRouteToHistory();
+
   if (customOrigin) {
     await drawRouteFromOrigin(customOrigin);
   } else {
@@ -2676,6 +2692,67 @@ async function calcRoute() {
       await drawRouteFromOrigin(routeStops[0]);
     }, { enableHighAccuracy: true, timeout: 5000 });
   }
+}
+
+function saveCurrentRouteToHistory() {
+  const entry = {
+    id: 'rh_' + Date.now(),
+    stops: JSON.parse(JSON.stringify(routeStops)),
+    origin: customOrigin ? JSON.parse(JSON.stringify(customOrigin)) : null,
+    label: routeStops.map(s => s.name).join(' → '),
+    savedAt: new Date().toISOString()
+  };
+  // 동일한 경로(같은 stop 이름 조합)면 기존 항목 제거 후 맨 앞에 추가
+  routeHistory = routeHistory.filter(h => h.label !== entry.label);
+  routeHistory.unshift(entry);
+  if (routeHistory.length > 10) routeHistory = routeHistory.slice(0, 10);
+  saveRouteHistory();
+  renderRouteHistory();
+}
+
+function renderRouteHistory() {
+  const container = document.getElementById('route-history');
+  if (!container) return;
+  if (routeHistory.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = `<div style="font-size:11px; color:var(--text2); margin:8px 0 4px; font-weight:600;">최근 경로</div>` +
+    routeHistory.map(h => `
+      <div class="route-stop-row" style="cursor:pointer;" onclick="loadRouteFromHistory('${h.id}')">
+        <span style="font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${h.label}</span>
+        <button class="route-stop-remove" onclick="event.stopPropagation(); removeRouteHistory('${h.id}')">−</button>
+      </div>`).join('');
+}
+
+function removeRouteHistory(id) {
+  routeHistory = routeHistory.filter(h => h.id !== id);
+  saveRouteHistory();
+  renderRouteHistory();
+}
+
+async function loadRouteFromHistory(id) {
+  const entry = routeHistory.find(h => h.id === id);
+  if (!entry) return;
+
+  routeStops = JSON.parse(JSON.stringify(entry.stops));
+  customOrigin = entry.origin ? JSON.parse(JSON.stringify(entry.origin)) : null;
+
+  resetOriginButtons();
+  if (customOrigin) {
+    document.getElementById('origin-label').textContent = '✓ ' + (customOrigin.label || '저장된 출발지');
+    document.getElementById('origin-label').style.color = 'var(--accent)';
+  } else if (isMobile) {
+    document.getElementById('origin-gps-btn').className = 'quick-log-btn selected-call';
+    document.getElementById('origin-label').textContent = '현재 위치 사용';
+    document.getElementById('origin-label').style.color = 'var(--success)';
+  }
+
+  renderRouteStops();
+  clearRouteLines();
+  routeSegmentTimes = [];
+
+  await calcRoute();
 }
 
 async function drawRouteFromOrigin(origin) {

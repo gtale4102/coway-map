@@ -2876,25 +2876,34 @@ window.addEventListener("load", async () => {
   currentUser = localStorage.getItem(USER_KEY) || '';
   checkUser();
   checkLock();
-  showToast('데이터 불러오는 중...');
-  await loadData();
+
+  // 지도 먼저 초기화 (데이터 로딩과 병렬로)
   kakao.maps.load(() => {
     initMap();
     renderLegend();
     updateOwnerLabel();
     if (currentUser) setOwnerFilter('me');
-    // 라벨 토글 초기 상태
     if (showLabels) {
       const btn = document.getElementById('label-toggle');
-      btn.style.borderColor = 'var(--accent)';
-      btn.style.color = 'var(--accent)';
+      if (btn) { btn.style.borderColor = 'var(--accent)'; btn.style.color = 'var(--accent)'; }
     }
-    // 리마인드 배너 체크
-    setTimeout(() => {
-      const days = parseInt(localStorage.getItem(REMIND_KEY) || '0');
-      if (days > 0) renderRemindList();
-    }, 2000);
   });
+
+  // 데이터 로딩은 별도로 (지도 초기화를 막지 않음)
+  showToast('데이터 불러오는 중...');
+  await loadData();
+
+  // 데이터 로딩 완료 후 마커/레전드 갱신
+  if (map) {
+    renderAllMarkers();
+    renderLegend();
+  }
+
+  // 리마인드 배너 체크
+  setTimeout(() => {
+    const days = parseInt(localStorage.getItem(REMIND_KEY) || '0');
+    if (days > 0) renderRemindList();
+  }, 500);
 });
 
 // 창 크기 변경 시 지도 재조정

@@ -1368,7 +1368,7 @@ function renderAllMarkers() {
 
     const color = getCategoryColor(c.category);
     const remindDays = parseInt(localStorage.getItem(REMIND_KEY) || '30');
-    const isOverdue = checkOverdue(c, remindDays);
+    const isOverdue = c.owner === currentUser && checkOverdue(c, remindDays);
 
     // 주소별 핀 표시
     const addrsWithCoords = (c.addresses || []).filter(a => a.lat && a.lng);
@@ -2343,7 +2343,7 @@ function renderRemindList() {
   const days = parseInt(localStorage.getItem(REMIND_KEY) || '30');
   document.getElementById('remind-days').value = days;
   const list = document.getElementById('remind-list');
-  const overdue = customers.filter(c => checkOverdue(c, days));
+  const overdue = customers.filter(c => c.owner === currentUser && checkOverdue(c, days));
 
   // 배너 업데이트
   const banner = document.getElementById('remind-banner');

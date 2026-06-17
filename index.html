@@ -1074,6 +1074,7 @@ let categories = [];
 let routeHistory = [];
 let markers = {};
 let activeFilters = new Set();
+let categoryAllMode = true; // true = 전체 보기, false = 개별 분류 필터 모드
 let ownerFilter = 'all';
 let showLabels = localStorage.getItem('coway_show_labels_v1') === '1';
 let isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -1362,7 +1363,7 @@ function renderAllMarkers() {
   markers = {};
 
   customers.forEach(c => {
-    if (activeFilters.size > 0 && !activeFilters.has(c.category)) return;
+    if (!categoryAllMode && !activeFilters.has(c.category)) return;
     if (ownerFilter === 'me' && c.owner !== currentUser) return;
     if (ownerFilter === 'partner' && c.owner === currentUser) return;
 
@@ -1437,20 +1438,21 @@ function renderLegend() {
 
   // 전체 버튼
   const allChip = document.createElement('div');
-  allChip.className = 'legend-chip' + (activeFilters.size === 0 ? '' : ' inactive');
+  allChip.className = 'legend-chip' + (categoryAllMode ? '' : ' inactive');
   allChip.style.borderColor = '#8b91b5';
   allChip.style.color = '#8b91b5';
   allChip.innerHTML = '<span class="legend-dot" style="background:#8b91b5"></span>전체';
-  allChip.onclick = () => { activeFilters.clear(); renderLegend(); renderAllMarkers(); };
+  allChip.onclick = () => { categoryAllMode = true; activeFilters.clear(); renderLegend(); renderAllMarkers(); };
   bar.appendChild(allChip);
 
   categories.forEach(cat => {
     const chip = document.createElement('div');
-    chip.className = 'legend-chip' + (activeFilters.size > 0 && !activeFilters.has(cat.id) ? ' inactive' : '');
+    chip.className = 'legend-chip' + (!categoryAllMode && !activeFilters.has(cat.id) ? ' inactive' : '');
     chip.style.borderColor = cat.color;
     chip.style.color = cat.color;
     chip.innerHTML = `<span class="legend-dot" style="background:${cat.color}"></span>${cat.name}`;
     chip.onclick = () => {
+      categoryAllMode = false;
       if (activeFilters.has(cat.id)) activeFilters.delete(cat.id);
       else activeFilters.add(cat.id);
       renderLegend(); renderAllMarkers();

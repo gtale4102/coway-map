@@ -931,6 +931,12 @@
       <div class="setting-info">
         <div class="setting-title">데이터 내보내기</div>
         <div class="setting-desc">전체 고객사 데이터를 JSON으로 저장</div>
+        <div class="setting-desc" style="color:var(--accent); margin-top:2px; line-height:1.5;">
+          보통 저장되는 위치 (기기/브라우저 설정에 따라 다를 수 있음):<br>
+          · 안드로이드: 내장저장소 → Download 폴더<br>
+          · PC: 사용자 폴더 → 다운로드 폴더<br>
+          · 아이폰: 파일 앱 → 다운로드
+        </div>
       </div>
       <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="exportData()">내보내기</button>
     </div>
@@ -1131,44 +1137,166 @@ async function saveData() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
   localStorage.setItem(CAT_KEY, JSON.stringify(categories));
   localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
-  await saveToSheet();
+  return await mergeAndSaveToSheet();
 }
 
 async function saveRouteHistory() {
   localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
-  await saveToSheet();
+  return await mergeAndSaveToSheet();
 }
 
 async function saveCats() {
   localStorage.setItem(CAT_KEY, JSON.stringify(categories));
-  await saveToSheet();
+  return await mergeAndSaveToSheet();
 }
 
-function saveToSheet() {
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// 저장 직전에 시트 최신 데이터를 가져와 병합 (동시 저장 충돌 방지) + 저장 후 검증 + 실패시 재시도
+async function mergeAndSaveToSheet(retriesLeft) {
+  if (retriesLeft === undefined) retriesLeft = 2;
+
+  try {
+    const remote = await fetchSheetData();
+    if (remote && remote.customers) {
+      const localIds = new Set(customers.map(c => c.id));
+      remote.customers.forEach(rc => {
+        if (!localIds.has(rc.id)) { customers.push(rc); localIds.add(rc.id); }
+      });
+      if (remote.categories && remote.categories.length > 0) {
+        const localCatIds = new Set(categories.map(c => c.id));
+        remote.categories.forEach(rc => {
+          if (!localCatIds.has(rc.id)) { categories.push(rc); localCatIds.add(rc.id); }
+        });
+      }
+      if (remote.routeHistory && remote.routeHistory.length > 0) {
+        const localHistIds = new Set(routeHistory.map(h => h.id));
+        remote.routeHistory.forEach(rh => {
+          if (!localHistIds.has(rh.id)) routeHistory.push(rh);
+        });
+        routeHistory.sort((a,b) => (b.savedAt||'').localeCompare(a.savedAt||''));
+        if (routeHistory.length > 10) routeHistory = routeHistory.slice(0,10);
+      }
+    }
+  } catch(err) {
+    console.error('merge fetch error', err);
+  }
+
+  const expectedIds = customers.map(c => c.id);
+  const expectedCount = customers.length;
+  const payload = JSON.stringify({ customers, categories, routeHistory });
+
+  await saveToSheetViaForm(payload);
+  await sleep(900); // Apps Script 처리 시간 확보
+
+  const ok = await verifySaveSuccess(expectedCount, expectedIds);
+
+  if (!ok) {
+    if (retriesLeft > 0) {
+      console.warn('저장 검증 실패, 재시도 중...', retriesLeft);
+      showToast('저장 확인 중 문제 발생, 재시도 중...');
+      await sleep(500);
+      return await mergeAndSaveToSheet(retriesLeft - 1);
+    }
+    console.error('저장 최종 실패 - 검증 불통과');
+    return false;
+  }
+  return true;
+}
+
+// 검증: 저장 후 다시 읽어와서 우리가 보낸 고객사 ID가 전부 존재하는지 확인
+async function verifySaveSuccess(expectedCount, expectedIds) {
+  try {
+    const remote = await fetchSheetData();
+    if (!remote || !remote.customers) return false;
+    if (remote.customers.length < expectedCount) return false;
+    const remoteIds = new Set(remote.customers.map(c => c.id));
+    for (const id of expectedIds) {
+      if (!remoteIds.has(id)) return false;
+    }
+    return true;
+  } catch(err) {
+    console.error('verify error', err);
+    return false;
+  }
+}
+
+function fetchSheetData() {
   return new Promise((resolve) => {
-    const cbName = 'saveCb_' + Date.now();
+    const cbName = 'mergeCb_' + Date.now() + '_' + Math.floor(Math.random()*10000);
     const script = document.createElement('script');
-    const data = encodeURIComponent(JSON.stringify({ customers, categories, routeHistory }));
     const timeout = setTimeout(() => {
       delete window[cbName];
       if (document.body.contains(script)) document.body.removeChild(script);
-      resolve();
-    }, 8000);
+      resolve(null);
+    }, 7000);
 
-    window[cbName] = () => {
+    window[cbName] = (data) => {
       clearTimeout(timeout);
       delete window[cbName];
       if (document.body.contains(script)) document.body.removeChild(script);
-      resolve();
+      resolve(data);
     };
 
-    script.src = SHEET_URL + '?action=save&token=' + SHEET_TOKEN + '&data=' + data + '&callback=' + cbName;
+    script.src = SHEET_URL + '?token=' + SHEET_TOKEN + '&callback=' + cbName + '&_=' + Date.now();
     script.onerror = () => {
       clearTimeout(timeout);
       delete window[cbName];
-      resolve();
+      resolve(null);
     };
     document.body.appendChild(script);
+  });
+}
+
+// POST 폼 + 숨김 iframe 방식 (URL 길이 제한 없음, CORS 문제 없음)
+let saveFormCounter = 0;
+function saveToSheetViaForm(jsonPayload) {
+  return new Promise((resolve) => {
+    saveFormCounter++;
+    const uid = 'saveio_' + saveFormCounter + '_' + Date.now();
+
+    const iframe = document.createElement('iframe');
+    iframe.name = uid;
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = SHEET_URL;
+    form.target = uid;
+    form.style.display = 'none';
+
+    const fields = { token: SHEET_TOKEN, action: 'save', payload: jsonPayload };
+    Object.keys(fields).forEach(key => {
+      const input = document.createElement('input');
+      input.name = key;
+      input.value = fields[key];
+      form.appendChild(input);
+    });
+
+    document.body.appendChild(form);
+
+    let resolved = false;
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      setTimeout(() => {
+        if (form.parentNode) form.remove();
+        if (iframe.parentNode) iframe.remove();
+      }, 300);
+      resolve();
+    };
+
+    iframe.onload = finish;
+    const timeout = setTimeout(finish, 9000);
+
+    try {
+      form.submit();
+    } catch(err) {
+      console.error('form submit error', err);
+      clearTimeout(timeout);
+      finish();
+    }
   });
 }
 
@@ -1724,10 +1852,14 @@ async function geocodeAddress(address) {
   });
 }
 
+let isSaving = false;
+
 async function submitForm() {
+  if (isSaving) { showToast('저장 처리 중입니다. 잠시 기다려주세요'); return; }
+  isSaving = true;
   try {
     const name = document.getElementById('f-name').value.trim();
-    if (!name) { showToast('고객사명을 입력하세요'); return; }
+    if (!name) { showToast('고객사명을 입력하세요'); isSaving = false; return; }
 
     const category = document.getElementById('f-category').value;
     const memo = document.getElementById('f-memo').value.trim();
@@ -1780,25 +1912,42 @@ async function submitForm() {
       });
     }
 
-    await saveData();
+    showToast('저장 중...');
+    const saved = await saveData();
+    if (!saved) {
+      showToast('⚠️ 저장 확인 실패! 인터넷 연결을 확인하고 다시 저장해주세요.');
+      isSaving = false;
+      return;
+    }
     renderAllMarkers();
     renderListBody();
     closeAllSheets();
-    showToast(editingCustomerId ? '수정되었습니다' : '고객사가 추가되었습니다');
+    showToast(editingCustomerId ? '수정되었습니다 (저장 확인됨)' : '고객사가 추가되었습니다 (저장 확인됨)');
+    isSaving = false;
   } catch(err) {
     console.error('submitForm error', err);
     showToast('저장 오류: ' + err.message);
+    isSaving = false;
   }
 }
 
-function deleteCustomer(id) {
+async function deleteCustomer(id) {
   if (!confirm('정말 삭제하시겠습니까?')) return;
+  const backup = customers;
   customers = customers.filter(c => c.id !== id);
-  saveData();
   closeAllSheets();
   renderListBody();
   renderAllMarkers();
-  showToast('삭제되었습니다');
+  showToast('삭제 처리 중...');
+  const saved = await saveData();
+  if (!saved) {
+    customers = backup;
+    renderAllMarkers();
+    renderListBody();
+    showToast('⚠️ 삭제 저장 실패! 다시 시도해주세요.');
+    return;
+  }
+  showToast('삭제되었습니다 (저장 확인됨)');
 }
 
 // ==================== DAILY LOG ====================
@@ -1836,26 +1985,38 @@ function selectLogType(type) {
   });
 }
 
-function submitDailyLog() {
+async function submitDailyLog() {
   const custId = document.getElementById('daily-customer').value;
   if (!custId) { showToast('고객사를 선택하세요'); return; }
   if (!selectedLogType) { showToast('컨택 유형을 선택하세요'); return; }
+  if (isSaving) { showToast('저장 처리 중입니다. 잠시 기다려주세요'); return; }
+  isSaving = true;
 
   const memo = document.getElementById('daily-memo').value.trim();
   const date = document.getElementById('daily-date-input').value || new Date().toISOString().slice(0, 10);
 
   const idx = customers.findIndex(c => c.id === custId);
-  if (idx === -1) return;
+  if (idx === -1) { isSaving = false; return; }
 
+  const backupLogs = JSON.parse(JSON.stringify(customers[idx].logs || []));
   if (!customers[idx].logs) customers[idx].logs = [];
   customers[idx].logs.push({ type: selectedLogType, date, memo });
 
-  saveData();
+  showToast('저장 중...');
+  const saved = await saveData();
+  if (!saved) {
+    customers[idx].logs = backupLogs;
+    showToast('⚠️ 컨택 기록 저장 실패! 다시 시도해주세요.');
+    isSaving = false;
+    return;
+  }
+
   document.getElementById('daily-memo').value = '';
   selectedLogType = null;
   ['visit','call','sms'].forEach(t => document.getElementById('ql-' + t).className = 'quick-log-btn');
   renderTodayLogs();
-  showToast('기록되었습니다');
+  showToast('기록되었습니다 (저장 확인됨)');
+  isSaving = false;
 }
 
 function renderTodayLogs() {
@@ -1983,17 +2144,22 @@ function removeCategory(i) {
   renderCategoryManager();
 }
 
-function saveCategories() {
+async function saveCategories() {
   // sync names from inputs
   document.querySelectorAll('.category-row').forEach((row, i) => {
     const inp = row.querySelector('.category-name-input');
     if (inp && categories[i]) categories[i].name = inp.value.trim() || categories[i].name;
   });
-  saveCats();
+  showToast('저장 중...');
+  const saved = await saveCats();
+  if (!saved) {
+    showToast('⚠️ 분류 저장 실패! 다시 시도해주세요.');
+    return;
+  }
   renderLegend();
   renderAllMarkers();
   closeAllSheets();
-  showToast('분류가 저장되었습니다');
+  showToast('분류가 저장되었습니다 (저장 확인됨)');
 }
 
 // ==================== COLOR PICKER ====================
@@ -2082,13 +2248,23 @@ function changeUser() {
 }
 
 function exportData() {
-  const data = { customers, categories, exportedAt: new Date().toISOString() };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = '고객사데이터_' + new Date().toISOString().slice(0,10) + '.json';
-  a.click();
-  URL.revokeObjectURL(url);
+  try {
+    const data = { customers, categories, routeHistory, exportedAt: new Date().toISOString() };
+    const filename = '고객사데이터_' + new Date().toISOString().slice(0,10) + '.json';
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('다운로드 완료: ' + filename + ' (다운로드 폴더 확인)');
+  } catch(err) {
+    console.error('export error', err);
+    showToast('내보내기 실패: ' + err.message);
+  }
 }
 
 function importData(e) {
@@ -2909,7 +3085,43 @@ window.addEventListener("load", async () => {
       const days = parseInt(localStorage.getItem(REMIND_KEY) || '0');
       if (days > 0) renderRemindList();
     }, 1000);
+    ensureMapRendering();
   });
+});
+
+// 지도가 정상적으로 렌더링됐는지 확인하고, 안 됐으면 자동 재시도
+function ensureMapRendering(retry) {
+  if (retry === undefined) retry = 0;
+  setTimeout(() => {
+    const container = document.getElementById('map');
+    const childCount = container ? container.childElementCount : 0;
+    if (!map || childCount < 2) {
+      if (retry < 3) {
+        console.warn('지도 렌더링 확인 실패, 재초기화 시도 #' + (retry + 1));
+        try {
+          initMap();
+          kakao.maps.event.trigger(map, 'resize');
+        } catch(err) {
+          console.error('재초기화 오류', err);
+        }
+        ensureMapRendering(retry + 1);
+      } else {
+        showToast('지도 로딩에 문제가 있습니다. 새로고침 해주세요.');
+      }
+    } else if (map) {
+      kakao.maps.event.trigger(map, 'resize');
+    }
+  }, 1500 + retry * 1200);
+}
+
+// 백그라운드에서 돌아올 때(bfcache 포함) 지도 재조정
+window.addEventListener('pageshow', (event) => {
+  if (map) {
+    setTimeout(() => kakao.maps.event.trigger(map, 'resize'), 200);
+  } else if (event.persisted) {
+    // bfcache로 복원됐는데 지도가 없으면 재초기화 시도
+    setTimeout(() => { if (typeof kakao !== 'undefined' && kakao.maps) { ensureMapRendering(); } }, 500);
+  }
 });
 
 // 창 크기 변경 시 지도 재조정

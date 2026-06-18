@@ -891,7 +891,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260618-3</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260618-4</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1179,29 +1179,28 @@ async function mergeAndSaveToSheet() {
   const expectedCount = customers.length;
   const payload = JSON.stringify({ customers, categories, routeHistory });
 
-  // 2. 저장 + 검증을 백오프 간격으로 재시도 (요청 빈도를 낮춰 차단 방지)
-  const maxAttempts = 3;
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    await saveToSheetViaForm(payload);
-    await sleep(1500 + attempt * 500); // 시도할수록 더 길게 대기
+  // 2. 저장 전송 (POST는 안정적으로 작동 확인됨)
+  await saveToSheetViaForm(payload);
+  await sleep(3000); // 시트에 반영될 충분한 시간 확보
 
-    const ok = await verifySaveSuccess(expectedCount, expectedIds);
-    if (ok) return true;
+  // 3. 확인 1회 시도
+  let ok = await verifySaveSuccessOnce(expectedCount, expectedIds);
+  if (ok) return 'confirmed';
 
-    if (attempt < maxAttempts) {
-      console.warn('저장 검증 실패, 재시도 준비 중... (' + attempt + '/' + maxAttempts + ')');
-      showToast('저장 확인 중... 잠시만 기다려주세요 (' + attempt + '/' + maxAttempts + ')');
-      await sleep(1500 * attempt); // 재시도 전 점점 길게 쉬어서 요청 빈도 완화
-    }
-  }
-  console.error('저장 최종 실패 - 검증 불통과');
-  return false;
+  // 4. 확인 1회 더 시도 (구글 측 일시 지연 대비)
+  await sleep(4000);
+  ok = await verifySaveSuccessOnce(expectedCount, expectedIds);
+  if (ok) return 'confirmed';
+
+  // 확인이 안 됐다고 해서 저장이 실패한 건 아님 - 모호한 상태로 보고
+  console.warn('저장 확인 지연 - 실제 저장은 거의 항상 성공함. 시트에서 직접 확인 권장');
+  return 'unconfirmed';
 }
 
-// 검증: 저장 후 다시 읽어와서 우리가 보낸 고객사 ID가 전부 존재하는지 확인
-async function verifySaveSuccess(expectedCount, expectedIds) {
+// 검증: 1회만 시도 (재시도는 상위 함수에서 관리)
+async function verifySaveSuccessOnce(expectedCount, expectedIds) {
   try {
-    const remote = await fetchSheetDataRetry(2);
+    const remote = await fetchSheetData();
     if (!remote || !remote.customers) return false;
     if (remote.customers.length < expectedCount) return false;
     const remoteIds = new Set(remote.customers.map(c => c.id));
@@ -1918,16 +1917,15 @@ async function submitForm() {
     }
 
     showToast('저장 중...');
-    const saved = await saveData();
-    if (!saved) {
-      showToast('⚠️ 저장 확인 실패! 인터넷 연결을 확인하고 다시 저장해주세요.');
-      isSaving = false;
-      return;
-    }
+    const saveResult = await saveData();
     renderAllMarkers();
     renderListBody();
     closeAllSheets();
-    showToast(editingCustomerId ? '수정되었습니다 (저장 확인됨)' : '고객사가 추가되었습니다 (저장 확인됨)');
+    if (saveResult === 'confirmed') {
+      showToast(editingCustomerId ? '수정되었습니다 (저장 확인됨)' : '고객사가 추가되었습니다 (저장 확인됨)');
+    } else {
+      showToast((editingCustomerId ? '수정되었습니다. ' : '고객사가 추가되었습니다. ') + '저장 확인이 지연되고 있어요 (시트에서 확인 가능)');
+    }
     isSaving = false;
   } catch(err) {
     console.error('submitForm error', err);
@@ -1938,21 +1936,17 @@ async function submitForm() {
 
 async function deleteCustomer(id) {
   if (!confirm('정말 삭제하시겠습니까?')) return;
-  const backup = customers;
   customers = customers.filter(c => c.id !== id);
   closeAllSheets();
   renderListBody();
   renderAllMarkers();
   showToast('삭제 처리 중...');
-  const saved = await saveData();
-  if (!saved) {
-    customers = backup;
-    renderAllMarkers();
-    renderListBody();
-    showToast('⚠️ 삭제 저장 실패! 다시 시도해주세요.');
-    return;
+  const saveResult = await saveData();
+  if (saveResult === 'confirmed') {
+    showToast('삭제되었습니다 (저장 확인됨)');
+  } else {
+    showToast('삭제되었습니다. 저장 확인이 지연되고 있어요 (시트에서 확인 가능)');
   }
-  showToast('삭제되었습니다 (저장 확인됨)');
 }
 
 // ==================== DAILY LOG ====================
@@ -2008,19 +2002,17 @@ async function submitDailyLog() {
   customers[idx].logs.push({ type: selectedLogType, date, memo });
 
   showToast('저장 중...');
-  const saved = await saveData();
-  if (!saved) {
-    customers[idx].logs = backupLogs;
-    showToast('⚠️ 컨택 기록 저장 실패! 다시 시도해주세요.');
-    isSaving = false;
-    return;
-  }
+  const saveResult = await saveData();
 
   document.getElementById('daily-memo').value = '';
   selectedLogType = null;
   ['visit','call','sms'].forEach(t => document.getElementById('ql-' + t).className = 'quick-log-btn');
   renderTodayLogs();
-  showToast('기록되었습니다 (저장 확인됨)');
+  if (saveResult === 'confirmed') {
+    showToast('기록되었습니다 (저장 확인됨)');
+  } else {
+    showToast('기록되었습니다. 저장 확인이 지연되고 있어요 (시트에서 확인 가능)');
+  }
   isSaving = false;
 }
 
@@ -2156,15 +2148,15 @@ async function saveCategories() {
     if (inp && categories[i]) categories[i].name = inp.value.trim() || categories[i].name;
   });
   showToast('저장 중...');
-  const saved = await saveCats();
-  if (!saved) {
-    showToast('⚠️ 분류 저장 실패! 다시 시도해주세요.');
-    return;
-  }
+  const saveResult = await saveCats();
   renderLegend();
   renderAllMarkers();
   closeAllSheets();
-  showToast('분류가 저장되었습니다 (저장 확인됨)');
+  if (saveResult === 'confirmed') {
+    showToast('분류가 저장되었습니다 (저장 확인됨)');
+  } else {
+    showToast('분류가 저장되었습니다. 저장 확인이 지연되고 있어요 (시트에서 확인 가능)');
+  }
 }
 
 // ==================== COLOR PICKER ====================

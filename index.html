@@ -1073,8 +1073,8 @@ let customers = [];
 let categories = [];
 let routeHistory = [];
 let markers = {};
-let activeFilters = new Set();
-let categoryAllMode = true; // true = 전체 보기, false = 개별 분류 필터 모드
+let activeFilters = new Set(); // 비어있으면 = 전체 표시, 채워지면 = 그 분류만 표시
+let categoryAllMode = true;
 let ownerFilter = 'all';
 let showLabels = localStorage.getItem('coway_show_labels_v1') === '1';
 let isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -1363,20 +1363,21 @@ function renderAllMarkers() {
   markers = {};
 
   customers.forEach(c => {
-    if (!categoryAllMode && !activeFilters.has(c.category)) return;
-    if (ownerFilter === 'me' && c.owner !== currentUser) return;
-    if (ownerFilter === 'partner' && c.owner === currentUser) return;
+    try {
+      if (!categoryAllMode && !activeFilters.has(c.category)) return;
+      if (ownerFilter === 'me' && c.owner !== currentUser) return;
+      if (ownerFilter === 'partner' && c.owner === currentUser) return;
 
-    const color = getCategoryColor(c.category);
-    const remindDays = parseInt(localStorage.getItem(REMIND_KEY) || '30');
-    const isOverdue = c.owner === currentUser && checkOverdue(c, remindDays);
+      const color = getCategoryColor(c.category);
+      const remindDays = parseInt(localStorage.getItem(REMIND_KEY) || '30');
+      const isOverdue = c.owner === currentUser && checkOverdue(c, remindDays);
 
-    // 주소별 핀 표시
-    const addrsWithCoords = (c.addresses || []).filter(a => a.lat && a.lng);
-    if (addrsWithCoords.length === 0 && c.lat && c.lng) {
-      // 구버전 호환 - 대표 좌표만 있는 경우
-      addrsWithCoords.push({ lat: c.lat, lng: c.lng, label: '' });
-    }
+      // 주소별 핀 표시
+      const addrsWithCoords = (c.addresses || []).filter(a => a.lat && a.lng);
+      if (addrsWithCoords.length === 0 && c.lat && c.lng) {
+        // 구버전 호환 - 대표 좌표만 있는 경우
+        addrsWithCoords.push({ lat: c.lat, lng: c.lng, label: '' });
+      }
 
     addrsWithCoords.forEach((addr, idx) => {
       const markerImg = makeMarkerImage(color);
@@ -1414,6 +1415,9 @@ function renderAllMarkers() {
         markers[markerId + '_badge'] = badge;
       }
     });
+    } catch(err) {
+      console.error('marker render error for', c.name, err);
+    }
   });
 }
 

@@ -891,7 +891,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정</div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260618-3</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -931,12 +931,6 @@
       <div class="setting-info">
         <div class="setting-title">데이터 내보내기</div>
         <div class="setting-desc">전체 고객사 데이터를 JSON으로 저장</div>
-        <div class="setting-desc" style="color:var(--accent); margin-top:2px; line-height:1.5;">
-          보통 저장되는 위치 (기기/브라우저 설정에 따라 다를 수 있음):<br>
-          · 안드로이드: 내장저장소 → Download 폴더<br>
-          · PC: 사용자 폴더 → 다운로드 폴더<br>
-          · 아이폰: 파일 앱 → 다운로드
-        </div>
       </div>
       <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="exportData()">내보내기</button>
     </div>
@@ -1153,11 +1147,10 @@ async function saveCats() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 // 저장 직전에 시트 최신 데이터를 가져와 병합 (동시 저장 충돌 방지) + 저장 후 검증 + 실패시 재시도
-async function mergeAndSaveToSheet(retriesLeft) {
-  if (retriesLeft === undefined) retriesLeft = 2;
-
+async function mergeAndSaveToSheet() {
+  // 1. 병합은 한 번만 수행
   try {
-    const remote = await fetchSheetData();
+    const remote = await fetchSheetDataRetry(2);
     if (remote && remote.customers) {
       const localIds = new Set(customers.map(c => c.id));
       remote.customers.forEach(rc => {
@@ -1186,28 +1179,29 @@ async function mergeAndSaveToSheet(retriesLeft) {
   const expectedCount = customers.length;
   const payload = JSON.stringify({ customers, categories, routeHistory });
 
-  await saveToSheetViaForm(payload);
-  await sleep(900); // Apps Script 처리 시간 확보
+  // 2. 저장 + 검증을 백오프 간격으로 재시도 (요청 빈도를 낮춰 차단 방지)
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    await saveToSheetViaForm(payload);
+    await sleep(1500 + attempt * 500); // 시도할수록 더 길게 대기
 
-  const ok = await verifySaveSuccess(expectedCount, expectedIds);
+    const ok = await verifySaveSuccess(expectedCount, expectedIds);
+    if (ok) return true;
 
-  if (!ok) {
-    if (retriesLeft > 0) {
-      console.warn('저장 검증 실패, 재시도 중...', retriesLeft);
-      showToast('저장 확인 중 문제 발생, 재시도 중...');
-      await sleep(500);
-      return await mergeAndSaveToSheet(retriesLeft - 1);
+    if (attempt < maxAttempts) {
+      console.warn('저장 검증 실패, 재시도 준비 중... (' + attempt + '/' + maxAttempts + ')');
+      showToast('저장 확인 중... 잠시만 기다려주세요 (' + attempt + '/' + maxAttempts + ')');
+      await sleep(1500 * attempt); // 재시도 전 점점 길게 쉬어서 요청 빈도 완화
     }
-    console.error('저장 최종 실패 - 검증 불통과');
-    return false;
   }
-  return true;
+  console.error('저장 최종 실패 - 검증 불통과');
+  return false;
 }
 
 // 검증: 저장 후 다시 읽어와서 우리가 보낸 고객사 ID가 전부 존재하는지 확인
 async function verifySaveSuccess(expectedCount, expectedIds) {
   try {
-    const remote = await fetchSheetData();
+    const remote = await fetchSheetDataRetry(2);
     if (!remote || !remote.customers) return false;
     if (remote.customers.length < expectedCount) return false;
     const remoteIds = new Set(remote.customers.map(c => c.id));
@@ -1246,6 +1240,17 @@ function fetchSheetData() {
     };
     document.body.appendChild(script);
   });
+}
+
+// 읽기 요청이 일시적으로 막히는 경우(구글 측 임시 오류)를 대비해 자체 재시도 포함
+async function fetchSheetDataRetry(maxTries) {
+  if (maxTries === undefined) maxTries = 3;
+  for (let i = 1; i <= maxTries; i++) {
+    const result = await fetchSheetData();
+    if (result) return result;
+    if (i < maxTries) await sleep(800 * i);
+  }
+  return null;
 }
 
 // POST 폼 + 숨김 iframe 방식 (URL 길이 제한 없음, CORS 문제 없음)

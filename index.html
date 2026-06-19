@@ -393,6 +393,22 @@
     padding: 10px 0; border-bottom: 1px solid var(--border);
   }
   .category-row:last-child { border-bottom: none; }
+
+  .drag-handle {
+    color: var(--text2);
+    font-size: 18px;
+    cursor: grab;
+    flex-shrink: 0;
+    padding: 4px 6px;
+    touch-action: none;
+    user-select: none;
+  }
+  .dragging-row {
+    opacity: 0.55;
+    background: var(--surface2);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+    border-radius: var(--radius-sm);
+  }
   .color-swatch {
     width: 24px; height: 24px; border-radius: 50%;
     border: 2px solid rgba(255,255,255,0.2); flex-shrink: 0;
@@ -912,7 +928,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-9</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-10</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -2239,6 +2255,84 @@ function renderListBody() {
   attachListRowHandlers();
 }
 
+// ==================== 길게 눌러 드래그로 순서 변경 (재사용 가능) ====================
+function setupDragReorder(containerId, rowSelector, getArray, onCommit) {
+  const container = document.getElementById(containerId);
+  if (!container || container.dataset.dragReady) return;
+  container.dataset.dragReady = '1';
+
+  let dragEl = null, longPressTimer = null, dragging = false, startX = 0, startY = 0;
+
+  function clearTimer() { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } }
+
+  function beginDrag(row) {
+    dragging = true;
+    dragEl = row;
+    row.classList.add('dragging-row');
+    if (navigator.vibrate) navigator.vibrate(30);
+  }
+
+  function moveDrag(clientY) {
+    if (!dragging || !dragEl) return;
+    const rows = Array.from(container.querySelectorAll(rowSelector)).filter(r => r !== dragEl);
+    let target = null;
+    for (const r of rows) {
+      const rect = r.getBoundingClientRect();
+      if (clientY < rect.top + rect.height / 2) { target = r; break; }
+    }
+    if (target) container.insertBefore(dragEl, target);
+    else container.appendChild(dragEl);
+  }
+
+  function endDrag() {
+    clearTimer();
+    if (dragging && dragEl) {
+      dragEl.classList.remove('dragging-row');
+      const rows = Array.from(container.querySelectorAll(rowSelector));
+      const origArr = getArray();
+      const newArr = rows.map(r => origArr[parseInt(r.dataset.idx)]);
+      onCommit(newArr);
+    }
+    dragging = false;
+    dragEl = null;
+  }
+
+  container.addEventListener('touchstart', (e) => {
+    const row = e.target.closest(rowSelector);
+    if (!row || !container.contains(row)) return;
+    const t = e.touches[0];
+    startX = t.clientX; startY = t.clientY;
+    longPressTimer = setTimeout(() => beginDrag(row), 350);
+  }, { passive: true });
+
+  container.addEventListener('touchmove', (e) => {
+    const t = e.touches[0];
+    if (longPressTimer && !dragging) {
+      if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) clearTimer();
+      return;
+    }
+    if (dragging) { moveDrag(t.clientY); e.preventDefault(); }
+  }, { passive: false });
+
+  container.addEventListener('touchend', endDrag);
+  container.addEventListener('touchcancel', endDrag);
+
+  container.addEventListener('mousedown', (e) => {
+    const row = e.target.closest(rowSelector);
+    if (!row || !container.contains(row)) return;
+    startX = e.clientX; startY = e.clientY;
+    longPressTimer = setTimeout(() => beginDrag(row), 350);
+  });
+  document.addEventListener('mousemove', (e) => {
+    if (longPressTimer && !dragging) {
+      if (Math.abs(e.clientX - startX) > 10 || Math.abs(e.clientY - startY) > 10) clearTimer();
+      return;
+    }
+    if (dragging) moveDrag(e.clientY);
+  });
+  document.addEventListener('mouseup', endDrag);
+}
+
 function attachListRowHandlers() {
   document.querySelectorAll('.list-item-row').forEach(row => {
     const id = row.dataset.cid;
@@ -2499,15 +2593,17 @@ function renderCategoryManager() {
     const isFixed = cat.id === UNCATEGORIZED_ID;
     return `
     <div class="category-row" data-idx="${i}">
+      <span class="drag-handle">⠿</span>
       <div class="color-swatch" style="background:${cat.color}" onclick="openColorPicker(event, ${i})"></div>
       <input class="category-name-input" value="${cat.name}" ${isFixed ? 'readonly style="opacity:0.6;"' : `onchange="categories[${i}].name = this.value"`}>
-      <div style="display:flex;flex-direction:column;gap:1px;">
-        <button class="remove-btn" style="font-size:11px;color:var(--text2);" onclick="moveCat(${i},-1)">▲</button>
-        <button class="remove-btn" style="font-size:11px;color:var(--text2);" onclick="moveCat(${i},1)">▼</button>
-      </div>
       ${isFixed ? '<span style="width:24px; flex-shrink:0;"></span>' : `<button class="remove-btn" onclick="removeCategory(${i})">−</button>`}
     </div>`;
   }).join('');
+
+  setupDragReorder('category-list', '.category-row', () => categories, (newArr) => {
+    categories = newArr;
+    renderCategoryManager();
+  });
 }
 
 function moveCat(idx, dir) {
@@ -3392,17 +3488,22 @@ function renderRouteStops() {
     // i번째 stop에 도달하는 구간 시간 = routeSegmentTimes[i] (0번째=현재위치→1번째)
     const segTime = routeSegmentTimes[i] ? Math.round(routeSegmentTimes[i]/60) + '분' : '';
     return `
-    <div class="route-stop-row">
+    <div class="route-stop-row" data-idx="${i}">
       <div class="route-stop-num" style="background:${color};">${i+1}</div>
       <span class="route-stop-name">${s.name}</span>
       <span class="route-stop-time" style="color:${color};">${segTime}</span>
-      <div style="display:flex;flex-direction:column;gap:2px;">
-        <button class="route-stop-remove" style="font-size:13px;color:var(--text2);" onclick="moveRouteStop(${i},-1)">▲</button>
-        <button class="route-stop-remove" style="font-size:13px;color:var(--text2);" onclick="moveRouteStop(${i},1)">▼</button>
-      </div>
+      <span class="drag-handle">⠿</span>
       <button class="route-stop-remove" onclick="removeRouteStop(${i})">−</button>
     </div>`;
   }).join('');
+
+  setupDragReorder('route-stops', '.route-stop-row', () => routeStops, (newArr) => {
+    routeStops = newArr;
+    clearRouteLines();
+    routeSegmentTimes = [];
+    document.getElementById('route-summary').style.display = 'none';
+    renderRouteStops();
+  });
 }
 
 function clearRoute() {

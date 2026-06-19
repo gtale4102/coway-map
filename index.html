@@ -108,8 +108,12 @@
   .search-input-wrap input:focus { border-color: var(--accent); }
   .search-input-wrap .search-icon {
     position: absolute; right: 10px;
-    color: var(--text2); font-size: 15px; pointer-events: none;
+    color: var(--text2); font-size: 16px;
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%;
   }
+  .search-input-wrap .search-icon:active { background: var(--border); }
   #search-results {
     position: absolute;
     top: calc(100% + 4px);
@@ -688,8 +692,8 @@
 
   <div class="searchbar" style="position:relative;">
     <div class="search-input-wrap">
-      <input type="text" id="search-input" placeholder="고객사 검색..." oninput="onSearch()" autocomplete="off">
-      <span class="search-icon">🔍</span>
+      <input type="text" id="search-input" placeholder="고객사 검색 (이름/주소/담당자/메모 등)..." oninput="onSearch()" autocomplete="off" onkeydown="if(event.key==='Enter'){applyMapSearchFilter();}">
+      <button type="button" class="search-icon" style="background:none; border:none; cursor:pointer; padding:0;" onclick="applyMapSearchFilter()" title="검색어로 지도에 표시">🔍</button>
     </div>
     <div id="search-results"></div>
   </div>
@@ -711,6 +715,10 @@
   <div class="legend-bar" id="legend-bar"></div>
 
   <div id="map">
+    <div id="inapp-browser-banner" style="display:none; position:absolute; top:10px; left:10px; right:10px; background:rgba(202,138,4,0.95); color:#fff; border-radius:var(--radius-sm); padding:10px 14px; z-index:52; font-size:12px; font-weight:600; box-shadow:0 2px 12px rgba(0,0,0,0.3); align-items:center; gap:8px; line-height:1.4;">
+      <div style="flex:1;">⚠️ 인앱 브라우저에서는 파일 첨부・로드뷰 등 일부 기능이 제한됩니다.<br>메뉴(≡ 또는 ⋮)에서 "다른 브라우저로 열기"를 선택해주세요.</div>
+      <button onclick="dismissInAppBanner()" style="background:none; border:none; color:#fff; font-size:16px; cursor:pointer; padding:0 4px; flex-shrink:0;">✕</button>
+    </div>
     <div id="remind-banner" style="display:none; position:absolute; top:10px; left:10px; right:10px; background:rgba(255,79,106,0.95); color:#fff; border-radius:var(--radius-sm); padding:10px 14px; z-index:51; font-size:13px; font-weight:600; box-shadow:0 2px 12px rgba(0,0,0,0.3); align-items:center; gap:8px;">
       <div style="flex:1; cursor:pointer;" onclick="openSheet('remind-sheet')">⏰ <span id="remind-count"></span>개 고객사 컨택 알림 → 탭해서 확인</div>
       <button onclick="hideRemindBanner()" style="background:none; border:none; color:#fff; font-size:16px; cursor:pointer; padding:0 4px; flex-shrink:0;">✕</button>
@@ -898,7 +906,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-4</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-5</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -946,7 +954,7 @@
         <div class="setting-title">데이터 가져오기</div>
         <div class="setting-desc">JSON 파일로 데이터 복원</div>
       </div>
-      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="document.getElementById('import-file').click()">가져오기</button>
+      <label for="import-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">가져오기</label>
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
     </div>
     <div class="setting-row">
@@ -954,8 +962,15 @@
         <div class="setting-title">고객사 일괄 가져오기</div>
         <div class="setting-desc">엑셀 양식으로 여러 고객사 한번에 추가</div>
       </div>
-      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="document.getElementById('excel-import-file').click()">엑셀 가져오기</button>
+      <label for="excel-import-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">엑셀 가져오기</label>
       <input type="file" id="excel-import-file" accept=".xlsx,.xls" style="display:none" onchange="handleExcelImport(event)">
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-title">휴지통</div>
+        <div class="setting-desc" id="trash-count-desc">삭제한 고객사 복원</div>
+      </div>
+      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="openSheet('trash-sheet')">열기</button>
     </div>
     <div style="margin-top:20px; padding:12px; background:var(--surface2); border-radius:var(--radius-sm); font-size:12px; color:var(--text2); line-height:1.6;">
       ✅ 구글 시트 연동 중 - 데이터가 자동으로 저장됩니다.<br>
@@ -1042,6 +1057,16 @@
   </div>
 </div>
 
+<!-- TRASH SHEET -->
+<div class="bottom-sheet" id="trash-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <div class="sheet-title">🗑️ 휴지통</div>
+    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div class="sheet-body" id="trash-body"></div>
+</div>
+
 <!-- ADDRESS SEARCH OVERLAY -->
 <div id="address-search-overlay" style="display:none; position:fixed; inset:0; background:var(--bg); z-index:700; flex-direction:column;">
   <div class="sheet-header" style="border-bottom:1px solid var(--border);">
@@ -1088,6 +1113,7 @@ function ensureUncategorized() {
 
 const REMIND_KEY = 'coway_remind_days_v1';
 const ROUTE_HIST_KEY = 'coway_route_history_v1';
+const TRASH_KEY = 'coway_trash_v1';
 const DELETED_IDS_KEY = 'coway_deleted_ids_v1';
 
 function loadDeletedIds() {
@@ -1104,6 +1130,10 @@ function markManyDeleted(ids) {
   const existing = loadDeletedIds();
   ids.forEach(id => { if (!existing.includes(id)) existing.push(id); });
   localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(existing.slice(-500)));
+}
+function unmarkDeleted(id) {
+  const ids = loadDeletedIds().filter(x => x !== id);
+  localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(ids));
 }
 
 const PALETTE = [
@@ -1127,6 +1157,7 @@ const PALETTE = [
 let customers = [];
 let categories = [];
 let routeHistory = [];
+let trash = []; // 삭제된 고객사 보관 (복원 가능)
 let markers = {};
 let activeFilters = new Set(); // 비어있으면 = 전체 표시, 채워지면 = 그 분류만 표시
 let categoryAllMode = true;
@@ -1138,6 +1169,7 @@ let editingCustomerId = null;
 let detailSheetOrigin = null; // 'list' | null - 상세화면 진입 경로 추적 (삭제 후 복귀 위치 결정)
 let listSelectMode = false;
 let selectedListIds = new Set();
+let mapSearchQuery = '';
 let selectedLogType = null;
 let currentColorTarget = null;
 let map = null;
@@ -1154,6 +1186,7 @@ async function loadData() {
       categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
       ensureUncategorized();
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
+      trash = JSON.parse(localStorage.getItem(TRASH_KEY) || '[]');
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
     }, 8000);
@@ -1166,10 +1199,12 @@ async function loadData() {
       categories = data.categories && data.categories.length > 0 ? data.categories : DEFAULT_CATEGORIES;
       ensureUncategorized();
       routeHistory = data.routeHistory || [];
+      trash = data.trash || [];
       // 로컬 백업
       localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
       localStorage.setItem(CAT_KEY, JSON.stringify(categories));
       localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
+      localStorage.setItem(TRASH_KEY, JSON.stringify(trash));
       resolve();
     };
 
@@ -1181,6 +1216,7 @@ async function loadData() {
       categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
       ensureUncategorized();
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
+      trash = JSON.parse(localStorage.getItem(TRASH_KEY) || '[]');
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
     };
@@ -1192,11 +1228,17 @@ async function saveData() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
   localStorage.setItem(CAT_KEY, JSON.stringify(categories));
   localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
+  localStorage.setItem(TRASH_KEY, JSON.stringify(trash));
   return await mergeAndSaveToSheet();
 }
 
 async function saveRouteHistory() {
   localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
+  return await mergeAndSaveToSheet();
+}
+
+async function saveTrash() {
+  localStorage.setItem(TRASH_KEY, JSON.stringify(trash));
   return await mergeAndSaveToSheet();
 }
 
@@ -1232,12 +1274,25 @@ async function mergeAndSaveToSheet() {
         routeHistory.sort((a,b) => (b.savedAt||'').localeCompare(a.savedAt||''));
         if (routeHistory.length > 10) routeHistory = routeHistory.slice(0,10);
       }
+      if (remote.trash && remote.trash.length > 0) {
+        const localTrashIds = new Set(trash.map(t => t.id));
+        const currentCustomerIds = new Set(customers.map(c => c.id));
+        remote.trash.forEach(rt => {
+          // 이미 복원되어 customers에 있는 경우는 trash에 다시 넣지 않음
+          if (!localTrashIds.has(rt.id) && !currentCustomerIds.has(rt.id)) {
+            trash.push(rt);
+            localTrashIds.add(rt.id);
+          }
+        });
+        trash.sort((a,b) => (b.deletedAt||'').localeCompare(a.deletedAt||''));
+        if (trash.length > 200) trash = trash.slice(0, 200);
+      }
     }
   } catch(err) {
     console.error('merge fetch error', err);
   }
 
-  const payload = JSON.stringify({ customers, categories, routeHistory });
+  const payload = JSON.stringify({ customers, categories, routeHistory, trash });
 
   // 2. 저장 전송 (POST는 안정적으로 작동 확인됨) - 즉시 처리, 검증 대기 없음
   await saveToSheetViaForm(payload);
@@ -1561,6 +1616,7 @@ function renderAllMarkers() {
       if (!categoryAllMode && !activeFilters.has(c.category)) return;
       if (ownerFilter === 'me' && c.owner !== currentUser) return;
       if (ownerFilter === 'partner' && c.owner === currentUser) return;
+      if (mapSearchQuery && !customerMatchesQuery(c, mapSearchQuery)) return;
 
       const color = getCategoryColor(c.category);
       const remindDays = parseInt(localStorage.getItem(REMIND_KEY) || '30');
@@ -1765,21 +1821,36 @@ function openKakaoNavi(address) {
   const url = `kakaomap://search?q=${encodeURIComponent(address)}`;
   window.location.href = url;
   setTimeout(() => {
-    window.open(`https://map.kakao.com/?q=${encodeURIComponent(address)}`, '_blank');
+    openExternalLink(`https://map.kakao.com/?q=${encodeURIComponent(address)}`);
   }, 500);
+}
+
+function isInAppBrowser() {
+  return /NAVER\(inapp|KAKAOTALK|FBAN|FBAV|Instagram|Line\//i.test(navigator.userAgent);
+}
+
+function openExternalLink(url) {
+  if (isInAppBrowser()) {
+    // 인앱 브라우저는 팝업/새 창이 정상 동작하지 않는 경우가 많아 바로 이동
+    location.href = url;
+    return;
+  }
+  const win = window.open(url, '_blank');
+  if (!win || win.closed || typeof win.closed === 'undefined') {
+    // 팝업이 차단된 경우 현재 창에서 이동
+    location.href = url;
+  }
 }
 
 function openRoadview(id) {
   const c = customers.find(x => x.id === id);
   if (!c) return;
   if (c.lat && c.lng) {
-    // 카카오맵 로드뷰 앱 딥링크 시도, 실패시 웹으로
-    const appUrl = `kakaomap://route?ep=${c.lat},${c.lng}&by=CAR`;
     const webUrl = `https://map.kakao.com/link/roadview/${c.lat},${c.lng}`;
-    window.open(webUrl, '_blank');
+    openExternalLink(webUrl);
   } else if (c.addresses && c.addresses.length > 0) {
     const addr = encodeURIComponent(c.addresses[0].address);
-    window.open(`https://map.kakao.com/?q=${addr}&panel=roadview`, '_blank');
+    openExternalLink(`https://map.kakao.com/?q=${addr}&panel=roadview`);
   } else {
     showToast('주소 또는 좌표가 없습니다');
   }
@@ -1994,8 +2065,13 @@ async function submitForm() {
 
 async function deleteCustomer(id) {
   if (!confirm('정말 삭제하시겠습니까?')) return;
+  const target = customers.find(c => c.id === id);
   markDeleted(id);
   customers = customers.filter(c => c.id !== id);
+  if (target) {
+    trash.unshift({ ...target, deletedAt: new Date().toISOString() });
+    if (trash.length > 200) trash = trash.slice(0, 200);
+  }
 
   if (detailSheetOrigin === 'list') {
     closeSheet('detail-sheet');
@@ -2007,7 +2083,7 @@ async function deleteCustomer(id) {
 
   renderAllMarkers();
   await saveData();
-  showToast('삭제되었습니다');
+  showToast('삭제되었습니다 (휴지통에서 복원 가능)');
 }
 
 // ==================== DAILY LOG ====================
@@ -2231,33 +2307,103 @@ async function bulkDeleteSelected() {
   if (!confirm(selectedListIds.size + '개 고객사를 삭제하시겠습니까?')) return;
 
   const ids = [...selectedListIds];
+  const targets = customers.filter(c => selectedListIds.has(c.id));
   markManyDeleted(ids);
   customers = customers.filter(c => !selectedListIds.has(c.id));
+  const now = new Date().toISOString();
+  targets.forEach(t => trash.unshift({ ...t, deletedAt: now }));
+  if (trash.length > 200) trash = trash.slice(0, 200);
 
   exitListSelectMode();
   renderAllMarkers();
   await saveData();
-  showToast(ids.length + '개 삭제되었습니다');
+  showToast(ids.length + '개 삭제되었습니다 (휴지통에서 복원 가능)');
 }
 
-// ==================== SEARCH ====================
+// ==================== TRASH (휴지통) ====================
+function renderTrashBody() {
+  const body = document.getElementById('trash-body');
+  const desc = document.getElementById('trash-count-desc');
+  if (desc) desc.textContent = trash.length > 0 ? `삭제한 고객사 복원 (${trash.length}개)` : '삭제한 고객사 복원';
+
+  if (trash.length === 0) {
+    body.innerHTML = '<div class="empty-state"><div>🗑️</div>휴지통이 비어있습니다</div>';
+    return;
+  }
+
+  body.innerHTML = trash.map(t => {
+    const color = getCategoryColor(t.category);
+    const catName = getCategoryName(t.category);
+    const deletedDate = t.deletedAt ? t.deletedAt.slice(0,10) : '';
+    return `<div class="contact-row">
+      <div style="flex:1; min-width:0;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <span class="legend-dot" style="background:${color}; width:10px; height:10px; flex-shrink:0;"></span>
+          <span style="font-weight:600;font-size:14px;">${t.name}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text2);">${catName} · 삭제일: ${deletedDate}</div>
+      </div>
+      <button class="action-btn primary" style="padding:6px 10px; font-size:12px; flex-shrink:0;" onclick="restoreFromTrash('${t.id}')">복원</button>
+      <button class="remove-btn" style="margin-left:4px;" onclick="permanentlyDeleteFromTrash('${t.id}')">−</button>
+    </div>`;
+  }).join('');
+}
+
+async function restoreFromTrash(id) {
+  const idx = trash.findIndex(t => t.id === id);
+  if (idx === -1) return;
+  const item = trash[idx];
+  const { deletedAt, ...customerData } = item;
+
+  trash.splice(idx, 1);
+  customers.push(customerData);
+  unmarkDeleted(id);
+
+  renderTrashBody();
+  renderAllMarkers();
+  await saveData();
+  showToast('복원되었습니다');
+}
+
+async function permanentlyDeleteFromTrash(id) {
+  if (!confirm('휴지통에서 영구적으로 삭제하시겠습니까? 복원할 수 없습니다.')) return;
+  trash = trash.filter(t => t.id !== id);
+  renderTrashBody();
+  await saveTrash();
+  showToast('영구 삭제되었습니다');
+}
+function customerMatchesQuery(c, q) {
+  if (!q) return true;
+  if (c.name && c.name.toLowerCase().includes(q)) return true;
+  if (c.memo && c.memo.toLowerCase().includes(q)) return true;
+  if ((c.contacts || []).some(ct => (ct.name||'').toLowerCase().includes(q) || (ct.phone||'').toLowerCase().includes(q))) return true;
+  if ((c.addresses || []).some(a => (a.label||'').toLowerCase().includes(q) || (a.address||'').toLowerCase().includes(q) || (a.detail||'').toLowerCase().includes(q))) return true;
+  const ownerDisplay = c.owner === '태일' ? '김태일' : (c.owner || '');
+  if (ownerDisplay.toLowerCase().includes(q)) return true;
+  const catName = getCategoryName(c.category);
+  if (catName && catName.toLowerCase().includes(q)) return true;
+  return false;
+}
+
 function onSearch() {
   const q = document.getElementById('search-input').value.trim().toLowerCase();
   const res = document.getElementById('search-results');
   if (!q) { res.style.display = 'none'; return; }
 
-  const matches = customers.filter(c =>
-    c.name.toLowerCase().includes(q) ||
-    (c.contacts || []).some(ct => ct.name.toLowerCase().includes(q))
-  ).slice(0, 8);
+  const matches = customers.filter(c => customerMatchesQuery(c, q)).slice(0, 10);
 
   if (matches.length === 0) { res.style.display = 'none'; return; }
 
   res.innerHTML = matches.map(c => {
     const color = getCategoryColor(c.category);
+    const labels = (c.addresses || []).map(a => a.label).filter(Boolean);
+    const labelText = labels.length > 0 ? labels.join(' · ') : '주소구분 없음';
     return `<div class="result-item" onclick="selectSearchResult('${c.id}')">
       <span class="legend-dot" style="background:${color};"></span>
-      <span>${c.name}</span>
+      <span style="flex:1;">
+        <span style="font-weight:600;">${c.name}</span>
+        <span style="color:var(--text2); font-size:12px; margin-left:6px;">${labelText}</span>
+      </span>
     </div>`;
   }).join('');
   res.style.display = 'block';
@@ -2272,6 +2418,55 @@ function selectSearchResult(id) {
     map.setLevel(4);
   }
   openDetail(id);
+}
+
+// 검색창 오른쪽 버튼: 검색어가 포함된 모든 고객사를 지도에 필터링해서 표시
+function applyMapSearchFilter() {
+  const q = document.getElementById('search-input').value.trim().toLowerCase();
+  document.getElementById('search-results').style.display = 'none';
+
+  if (!q) {
+    clearMapSearchFilter();
+    return;
+  }
+
+  mapSearchQuery = q;
+  renderAllMarkers();
+  updateMapSearchChip();
+
+  // 매칭된 고객사들이 보이도록 지도 범위 조정
+  const matched = customers.filter(c => customerMatchesQuery(c, q) && c.lat && c.lng);
+  if (matched.length > 0) {
+    const bounds = new kakao.maps.LatLngBounds();
+    matched.forEach(c => {
+      (c.addresses || []).filter(a => a.lat && a.lng).forEach(a => bounds.extend(new kakao.maps.LatLng(a.lat, a.lng)));
+    });
+    if (!bounds.isEmpty()) map.setBounds(bounds);
+    showToast(matched.length + '개 고객사 표시 중');
+  } else {
+    showToast('일치하는 고객사가 없습니다');
+  }
+}
+
+function clearMapSearchFilter() {
+  mapSearchQuery = '';
+  renderAllMarkers();
+  updateMapSearchChip();
+}
+
+function updateMapSearchChip() {
+  let chip = document.getElementById('map-search-chip');
+  if (mapSearchQuery) {
+    if (!chip) {
+      chip = document.createElement('div');
+      chip.id = 'map-search-chip';
+      chip.style.cssText = 'position:absolute; top:10px; left:10px; right:10px; background:var(--accent); color:#fff; border-radius:var(--radius-sm); padding:8px 14px; z-index:51; font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; box-shadow:0 2px 12px rgba(0,0,0,0.3);';
+      document.getElementById('map').appendChild(chip);
+    }
+    chip.innerHTML = `<span style="flex:1;">🔍 "${mapSearchQuery}" 검색 결과만 표시 중</span><button onclick="clearMapSearchFilter(); document.getElementById('search-input').value='';" style="background:none; border:none; color:#fff; font-size:16px; cursor:pointer; padding:0 4px;">✕</button>`;
+  } else if (chip) {
+    chip.remove();
+  }
 }
 
 document.addEventListener('click', (e) => {
@@ -2392,6 +2587,7 @@ function openSheet(id, arg1, arg2) {
   if (id === 'category-sheet') renderCategoryManager();
   if (id === 'history-sheet') renderHistoryBody();
   if (id === 'remind-sheet') renderRemindList();
+  if (id === 'trash-sheet') renderTrashBody();
   if (id === 'settings-sheet') {
     const isOn = localStorage.getItem(PIN_ON_KEY) === '1';
     document.getElementById('pin-toggle').classList.toggle('on', isOn);
@@ -2844,11 +3040,27 @@ function hideRemindBanner() {
 }
 
 function updateRoutePanelPosition() {
-  const banner = document.getElementById('remind-banner');
+  const remindBanner = document.getElementById('remind-banner');
+  const inappBanner = document.getElementById('inapp-browser-banner');
   const panel = document.getElementById('route-panel');
   if (!panel) return;
-  const bannerVisible = banner && banner.style.display !== 'none';
-  panel.style.top = bannerVisible ? '54px' : '10px';
+  let offset = 10;
+  if (inappBanner && inappBanner.style.display !== 'none') offset += 50;
+  if (remindBanner && remindBanner.style.display !== 'none') offset += 50;
+  panel.style.top = offset + 'px';
+}
+
+function dismissInAppBanner() {
+  localStorage.setItem('coway_inapp_banner_dismissed_v1', '1');
+  document.getElementById('inapp-browser-banner').style.display = 'none';
+  updateRoutePanelPosition();
+}
+
+function checkInAppBrowserWarning() {
+  if (!isInAppBrowser()) return;
+  if (localStorage.getItem('coway_inapp_banner_dismissed_v1') === '1') return;
+  document.getElementById('inapp-browser-banner').style.display = 'flex';
+  updateRoutePanelPosition();
 }
 
 function renderRemindList() {
@@ -3400,6 +3612,7 @@ window.addEventListener("load", async () => {
   currentUser = localStorage.getItem(USER_KEY) || '';
   checkUser();
   checkLock();
+  checkInAppBrowserWarning();
   showToast('데이터 불러오는 중...');
   await loadData();
 

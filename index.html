@@ -771,7 +771,7 @@
         <button id="rp-tab-address" class="quick-log-btn" style="flex:1; padding:8px; font-size:12px;" onclick="setRoutePickerTab('address')">📍 주소 직접입력</button>
       </div>
       <div id="rp-customer-tab" style="padding:8px;">
-        <input type="text" class="form-input" id="route-picker-search" placeholder="고객사 검색..." oninput="renderRoutePicker()" style="margin-bottom:8px;">
+        <input type="text" class="form-input" id="route-picker-search" placeholder="고객사 검색 (이름/주소/담당자/메모 등)..." oninput="renderRoutePicker()" style="margin-bottom:8px;">
       </div>
       <div id="rp-address-tab" style="display:none; padding:8px;">
         <input type="text" class="form-input" id="route-picker-name" placeholder="표시 이름 (예: 점심장소)" style="margin-bottom:6px;">
@@ -906,7 +906,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-5</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-6</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -3268,7 +3268,7 @@ function renderRoutePicker() {
   // 회사 단위로 그룹화 (좌표 있는 주소가 1개 이상인 고객사만)
   const companies = [];
   customers.forEach(c => {
-    if (!c.name.toLowerCase().includes(q)) return;
+    if (!customerMatchesQuery(c, q)) return;
     let addrs = (c.addresses || []).filter(a => a.lat && a.lng);
     if (addrs.length === 0 && c.lat && c.lng) {
       addrs = [{ label: '', lat: c.lat, lng: c.lng }];
@@ -3293,7 +3293,7 @@ function renderRoutePicker() {
       return `
       <div class="route-stop-row" style="cursor:pointer;" onclick="addRouteStop('${comp.custId}', 0, '${a.lat}', '${a.lng}', '${displayName.replace(/'/g,"\\'")}')">
         <span class="legend-dot" style="background:${color};width:10px;height:10px;flex-shrink:0;"></span>
-        <span class="route-stop-name">${comp.name}</span>
+        <span class="route-stop-name">${comp.name}${a.label ? ' <span style="color:var(--text2);font-weight:400;">(' + a.label + ')</span>' : ''}</span>
         <span style="font-size:11px;color:var(--success);">${routeStops.find(r=>r.stopKey===stopKey)?'✓':''}</span>
       </div>`;
     } else {
@@ -3406,7 +3406,7 @@ function clearRouteLines() {
 }
 
 async function calcRoute() {
-  if (routeStops.length < 2) { showToast('최소 2곳 이상 추가하세요'); return; }
+  if (routeStops.length < 1) { showToast('목적지를 1곳 이상 추가하세요'); return; }
 
   if (!customOrigin && !isMobile) {
     showToast('PC에서는 출발지를 직접 선택해주세요');

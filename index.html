@@ -891,7 +891,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-1</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-2</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1410,6 +1410,16 @@ function initMap() {
     }
 
     renderAllMarkers();
+
+    // 컨테이너 레이아웃이 늦게 확정되는 경우(특히 뒤로가기 복원 시) 대비
+    // 여러 타이밍에 강제로 리사이즈 트리거를 걸어 타일이 깨진 채로 멈추는 것을 방지
+    [50, 200, 500, 1000].forEach(delay => {
+      setTimeout(() => {
+        if (map) {
+          kakao.maps.event.trigger(map, 'resize');
+        }
+      }, delay);
+    });
   } catch(err) {
     console.error('initMap error', err);
     showMapErrorOverlay(err.message);
@@ -3102,7 +3112,11 @@ function ensureMapRendering(retry) {
 // 백그라운드에서 돌아올 때(bfcache 포함) 지도 재조정
 window.addEventListener('pageshow', (event) => {
   if (map) {
-    setTimeout(() => kakao.maps.event.trigger(map, 'resize'), 200);
+    [50, 200, 500, 1000].forEach(delay => {
+      setTimeout(() => {
+        if (map) kakao.maps.event.trigger(map, 'resize');
+      }, delay);
+    });
   } else if (event.persisted) {
     // bfcache로 복원됐는데 지도가 없으면 재초기화 시도
     setTimeout(() => { if (typeof kakao !== 'undefined' && kakao.maps) { ensureMapRendering(); } }, 500);

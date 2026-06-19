@@ -520,11 +520,11 @@
   .route-panel {
     position: absolute;
     top: 10px; left: 10px; right: 10px;
+    bottom: 90px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     z-index: 50;
-    max-height: 60vh;
     display: none;
     flex-direction: column;
     box-shadow: 0 4px 20px rgba(0,0,0,0.4);
@@ -591,7 +591,7 @@
     flex-shrink: 0;
   }
   #route-history {
-    max-height: 130px;
+    max-height: 70px;
     overflow-y: auto;
     flex-shrink: 0;
     border-top: 1px solid var(--border);
@@ -912,7 +912,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-8</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-9</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -3471,10 +3471,12 @@ function renderRouteHistory() {
     container.innerHTML = '';
     return;
   }
-  container.innerHTML = `<div style="font-size:11px; color:var(--text2); margin:8px 0 4px; font-weight:600;">최근 경로</div>` +
+  container.innerHTML = `<div style="font-size:11px; color:var(--text2); margin:8px 0 4px; font-weight:600;">최근 경로 (좌우로 밀어서 전체 확인)</div>` +
     routeHistory.map(h => `
-      <div class="route-stop-row" style="cursor:pointer;" onclick="loadRouteFromHistory('${h.id}')">
-        <span style="font-size:12px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${h.label}</span>
+      <div class="route-stop-row" style="align-items:center;">
+        <div style="flex:1; overflow-x:auto; white-space:nowrap; -webkit-overflow-scrolling:touch; cursor:pointer;" onclick="loadRouteFromHistory('${h.id}')">
+          <span style="font-size:12px;">${h.label}</span>
+        </div>
         <button class="route-stop-remove" onclick="event.stopPropagation(); removeRouteHistory('${h.id}')">−</button>
       </div>`).join('');
 }

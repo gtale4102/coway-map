@@ -590,6 +590,12 @@
     border-top: 1px solid var(--border);
     flex-shrink: 0;
   }
+  #route-history {
+    max-height: 130px;
+    overflow-y: auto;
+    flex-shrink: 0;
+    border-top: 1px solid var(--border);
+  }
 
   /* 경로 버튼 */
   .route-fab {
@@ -906,7 +912,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-7</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-8</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -3473,15 +3479,11 @@ function renderRouteHistory() {
       </div>`).join('');
 }
 
-let isRouteHistSaving = false;
-async function removeRouteHistory(id) {
-  if (isRouteHistSaving) return;
-  isRouteHistSaving = true;
+function removeRouteHistory(id) {
   markRouteHistDeleted(id);
   routeHistory = routeHistory.filter(h => h.id !== id);
   renderRouteHistory();
-  await saveRouteHistory();
-  isRouteHistSaving = false;
+  saveRouteHistory(); // 백그라운드에서 저장 (기다리지 않음 - 삭제 기록이 즉시 표시되도록)
 }
 
 async function loadRouteFromHistory(id) {

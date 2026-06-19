@@ -14,6 +14,7 @@
 <title>고객사 지도</title>
 <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=1f8090d36c43b8db729e5495eb0a0d59&libraries=services&autoload=false"></script>
 <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -891,7 +892,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-2</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-3</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -941,6 +942,14 @@
       </div>
       <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="document.getElementById('import-file').click()">가져오기</button>
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-title">고객사 일괄 가져오기</div>
+        <div class="setting-desc">엑셀 양식으로 여러 고객사 한번에 추가</div>
+      </div>
+      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="document.getElementById('excel-import-file').click()">엑셀 가져오기</button>
+      <input type="file" id="excel-import-file" accept=".xlsx,.xls" style="display:none" onchange="handleExcelImport(event)">
     </div>
     <div style="margin-top:20px; padding:12px; background:var(--surface2); border-radius:var(--radius-sm); font-size:12px; color:var(--text2); line-height:1.6;">
       ✅ 구글 시트 연동 중 - 데이터가 자동으로 저장됩니다.<br>
@@ -1015,6 +1024,18 @@
   </div>
 </div>
 
+<!-- EXCEL IMPORT RESULT SHEET -->
+<div class="bottom-sheet" id="excel-import-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <div class="sheet-title">📥 엑셀 가져오기</div>
+    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div class="sheet-body" id="excel-import-body">
+    <div class="empty-state"><div>📥</div>처리 중입니다...</div>
+  </div>
+</div>
+
 <!-- ADDRESS SEARCH OVERLAY -->
 <div id="address-search-overlay" style="display:none; position:fixed; inset:0; background:var(--bg); z-index:700; flex-direction:column;">
   <div class="sheet-header" style="border-bottom:1px solid var(--border);">
@@ -1047,6 +1068,17 @@ const DEFAULT_CATEGORIES = [
   { id: 'c4', name: '휴면', color: '#64748b' },        // 회색
   { id: 'c5', name: '대기업', color: '#dc2626' },      // 빨강
 ];
+
+const UNCATEGORIZED_ID = 'cuc';
+const UNCATEGORIZED_NAME = '미분류';
+const UNCATEGORIZED_COLOR = '#9ca3af';
+
+// "미분류" 고정 항목이 항상 존재하도록 보장 (없으면 추가)
+function ensureUncategorized() {
+  if (!categories.find(c => c.id === UNCATEGORIZED_ID)) {
+    categories.push({ id: UNCATEGORIZED_ID, name: UNCATEGORIZED_NAME, color: UNCATEGORIZED_COLOR });
+  }
+}
 
 const REMIND_KEY = 'coway_remind_days_v1';
 const ROUTE_HIST_KEY = 'coway_route_history_v1';
@@ -1094,6 +1126,7 @@ async function loadData() {
       document.body.removeChild(script);
       customers = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
       categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
+      ensureUncategorized();
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
@@ -1105,6 +1138,7 @@ async function loadData() {
       document.body.removeChild(script);
       customers = data.customers || [];
       categories = data.categories && data.categories.length > 0 ? data.categories : DEFAULT_CATEGORIES;
+      ensureUncategorized();
       routeHistory = data.routeHistory || [];
       // 로컬 백업
       localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
@@ -1119,6 +1153,7 @@ async function loadData() {
       delete window[cbName];
       customers = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
       categories = JSON.parse(localStorage.getItem(CAT_KEY) || 'null') || DEFAULT_CATEGORIES;
+      ensureUncategorized();
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
@@ -2094,16 +2129,19 @@ document.addEventListener('click', (e) => {
 // ==================== CATEGORIES ====================
 function renderCategoryManager() {
   const list = document.getElementById('category-list');
-  list.innerHTML = categories.map((cat, i) => `
+  list.innerHTML = categories.map((cat, i) => {
+    const isFixed = cat.id === UNCATEGORIZED_ID;
+    return `
     <div class="category-row" data-idx="${i}">
       <div class="color-swatch" style="background:${cat.color}" onclick="openColorPicker(event, ${i})"></div>
-      <input class="category-name-input" value="${cat.name}" onchange="categories[${i}].name = this.value">
+      <input class="category-name-input" value="${cat.name}" ${isFixed ? 'readonly style="opacity:0.6;"' : `onchange="categories[${i}].name = this.value"`}>
       <div style="display:flex;flex-direction:column;gap:1px;">
         <button class="remove-btn" style="font-size:11px;color:var(--text2);" onclick="moveCat(${i},-1)">▲</button>
         <button class="remove-btn" style="font-size:11px;color:var(--text2);" onclick="moveCat(${i},1)">▼</button>
       </div>
-      <button class="remove-btn" onclick="removeCategory(${i})">−</button>
-    </div>`).join('');
+      ${isFixed ? '<span style="width:24px; flex-shrink:0;"></span>' : `<button class="remove-btn" onclick="removeCategory(${i})">−</button>`}
+    </div>`;
+  }).join('');
 }
 
 function moveCat(idx, dir) {
@@ -2122,6 +2160,10 @@ function addCategory() {
 
 function removeCategory(i) {
   if (categories.length <= 1) { showToast('최소 1개는 있어야 합니다'); return; }
+  if (categories[i] && categories[i].id === UNCATEGORIZED_ID) {
+    showToast('미분류는 삭제할 수 없습니다');
+    return;
+  }
   categories.splice(i, 1);
   renderCategoryManager();
 }
@@ -2252,13 +2294,162 @@ function importData(e) {
     try {
       const data = JSON.parse(ev.target.result);
       if (data.customers) customers = data.customers;
-      if (data.categories) categories = data.categories;
+      if (data.categories) { categories = data.categories; ensureUncategorized(); }
       saveData(); saveCats();
       renderAllMarkers(); renderLegend();
       showToast('데이터를 가져왔습니다');
     } catch { showToast('파일 형식이 올바르지 않습니다'); }
   };
   reader.readAsText(file);
+}
+
+// ==================== EXCEL 일괄 가져오기 ====================
+async function handleExcelImport(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = ''; // 같은 파일 다시 선택 가능하도록 초기화
+
+  closeAllSheets();
+  setTimeout(() => openSheet('excel-import-sheet'), 150);
+  document.getElementById('excel-import-body').innerHTML = '<div class="empty-state"><div>📥</div>엑셀 파일 읽는 중...</div>';
+
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    try {
+      const wb = XLSX.read(ev.target.result, { type: 'array' });
+      const sheetName = wb.SheetNames.find(n => n.includes('고객사')) || wb.SheetNames[0];
+      const sheet = wb.Sheets[sheetName];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+
+      if (rows.length === 0) {
+        document.getElementById('excel-import-body').innerHTML = '<div class="empty-state"><div>📭</div>읽을 데이터가 없습니다</div>';
+        return;
+      }
+
+      await processExcelImport(rows);
+    } catch (err) {
+      console.error('excel parse error', err);
+      document.getElementById('excel-import-body').innerHTML = `<div class="empty-state"><div>⚠️</div>엑셀 파일을 읽을 수 없습니다<br><small style="margin-top:6px;display:block;color:var(--text2);">${err.message}</small></div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+async function processExcelImport(rows) {
+  // 컬럼명 후보 매핑 (양식이 약간 달라도 인식되도록)
+  const getCol = (row, names) => {
+    for (const n of names) {
+      if (row[n] !== undefined && row[n] !== '') return String(row[n]).trim();
+    }
+    return '';
+  };
+
+  // 같은 고객사명끼리 묶기 (행마다 주소 1개씩 = 여러 행이 한 고객사일 수 있음)
+  const grouped = {};
+  const order = [];
+  rows.forEach(row => {
+    const name = getCol(row, ['고객사명', '회사명', '상호명']);
+    if (!name) return;
+    if (!grouped[name]) { grouped[name] = []; order.push(name); }
+    grouped[name].push(row);
+  });
+
+  if (order.length === 0) {
+    document.getElementById('excel-import-body').innerHTML = '<div class="empty-state"><div>📭</div>고객사명이 있는 행이 없습니다</div>';
+    return;
+  }
+
+  const total = order.length;
+  let done = 0;
+  const geocodeFailed = [];
+  const newCustomers = [];
+
+  for (const name of order) {
+    const groupRows = grouped[name];
+    document.getElementById('excel-import-body').innerHTML =
+      `<div class="empty-state"><div>📥</div>처리 중... (${done+1}/${total})<br><small style="margin-top:6px;display:block;color:var(--text2);">${name}</small></div>`;
+
+    const first = groupRows[0];
+    const ownerRaw = getCol(first, ['소유자', '담당', '영업담당']);
+    const owner = (ownerRaw === '정열' || ownerRaw === '태일') ? ownerRaw : (currentUser || '태일');
+
+    const catName = getCol(first, ['분류']);
+    let categoryId = UNCATEGORIZED_ID;
+    if (catName) {
+      const matched = categories.find(c => c.name === catName);
+      if (matched) categoryId = matched.id;
+    }
+
+    const memo = getCol(first, ['메모', '비고']);
+
+    // 담당자 (행마다 다를 수 있어 중복 제거)
+    const contactsMap = {};
+    groupRows.forEach(r => {
+      const cName = getCol(r, ['담당자명', '담당자']);
+      const cPhone = getCol(r, ['연락처', '전화번호']);
+      if (cName || cPhone) {
+        const key = cName + '|' + cPhone;
+        contactsMap[key] = { name: cName, phone: cPhone };
+      }
+    });
+    const contacts = Object.values(contactsMap);
+
+    // 주소들 - 행마다 1개, 지오코딩 수행
+    const addresses = [];
+    for (const r of groupRows) {
+      const addrLabel = getCol(r, ['주소구분', '구분']);
+      const addrText = getCol(r, ['주소']);
+      const addrDetail = getCol(r, ['상세주소', '상세']);
+      if (!addrText) continue;
+
+      let lat = null, lng = null;
+      try {
+        const geo = await geocodeAddress(addrText);
+        if (geo) { lat = geo.lat; lng = geo.lng; }
+        else geocodeFailed.push({ name, address: addrText });
+      } catch {
+        geocodeFailed.push({ name, address: addrText });
+      }
+      addresses.push({ label: addrLabel, address: addrText, detail: addrDetail, lat, lng });
+    }
+
+    const firstAddr = addresses.find(a => a.lat);
+
+    newCustomers.push({
+      id: 'cst_' + Date.now() + '_' + Math.floor(Math.random()*1000),
+      name, category: categoryId, memo, contacts, addresses,
+      lat: firstAddr ? firstAddr.lat : null,
+      lng: firstAddr ? firstAddr.lng : null,
+      owner,
+      logs: [],
+      createdAt: new Date().toISOString()
+    });
+
+    done++;
+  }
+
+  customers = customers.concat(newCustomers);
+  document.getElementById('excel-import-body').innerHTML = '<div class="empty-state"><div>💾</div>저장 중...</div>';
+  await saveData();
+  renderAllMarkers();
+  renderListBody();
+
+  // 결과 화면
+  let resultHtml = `<div style="padding:8px 0;">
+    <div style="font-size:14px; font-weight:700; margin-bottom:4px;">✅ ${newCustomers.length}개 고객사 추가 완료</div>
+    <div style="font-size:12px; color:var(--text2); margin-bottom:12px;">저장이 확인되었습니다</div>`;
+
+  if (geocodeFailed.length > 0) {
+    resultHtml += `<div class="section-divider">⚠️ 주소 변환 실패 (${geocodeFailed.length}건)</div>
+      <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">아래 주소는 지도에 핀이 표시되지 않습니다. 고객사 수정 화면에서 주소를 다시 검색해주세요.</div>`;
+    geocodeFailed.forEach(f => {
+      resultHtml += `<div class="contact-row"><div><div style="font-weight:600;font-size:13px;">${f.name}</div><div style="font-size:12px;color:var(--text2);">${f.address}</div></div></div>`;
+    });
+  }
+
+  resultHtml += `<button class="submit-btn" onclick="closeAllSheets()" style="margin-top:16px;">확인</button>`;
+  document.getElementById('excel-import-body').innerHTML = resultHtml;
+  showToast('가져오기 완료');
 }
 
 // ==================== TOAST ====================

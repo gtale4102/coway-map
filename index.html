@@ -906,7 +906,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-6</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-7</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1115,6 +1115,7 @@ const REMIND_KEY = 'coway_remind_days_v1';
 const ROUTE_HIST_KEY = 'coway_route_history_v1';
 const TRASH_KEY = 'coway_trash_v1';
 const DELETED_IDS_KEY = 'coway_deleted_ids_v1';
+const DELETED_ROUTE_HIST_KEY = 'coway_deleted_route_hist_v1';
 
 function loadDeletedIds() {
   try { return JSON.parse(localStorage.getItem(DELETED_IDS_KEY) || '[]'); } catch { return []; }
@@ -1130,6 +1131,15 @@ function markManyDeleted(ids) {
   const existing = loadDeletedIds();
   ids.forEach(id => { if (!existing.includes(id)) existing.push(id); });
   localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(existing.slice(-500)));
+}
+
+function loadDeletedRouteHistIds() {
+  try { return JSON.parse(localStorage.getItem(DELETED_ROUTE_HIST_KEY) || '[]'); } catch { return []; }
+}
+function markRouteHistDeleted(id) {
+  const ids = loadDeletedRouteHistIds();
+  if (!ids.includes(id)) ids.push(id);
+  localStorage.setItem(DELETED_ROUTE_HIST_KEY, JSON.stringify(ids.slice(-100)));
 }
 function unmarkDeleted(id) {
   const ids = loadDeletedIds().filter(x => x !== id);
@@ -1268,8 +1278,9 @@ async function mergeAndSaveToSheet() {
       }
       if (remote.routeHistory && remote.routeHistory.length > 0) {
         const localHistIds = new Set(routeHistory.map(h => h.id));
+        const deletedHistIds = new Set(loadDeletedRouteHistIds());
         remote.routeHistory.forEach(rh => {
-          if (!localHistIds.has(rh.id)) routeHistory.push(rh);
+          if (!localHistIds.has(rh.id) && !deletedHistIds.has(rh.id)) routeHistory.push(rh);
         });
         routeHistory.sort((a,b) => (b.savedAt||'').localeCompare(a.savedAt||''));
         if (routeHistory.length > 10) routeHistory = routeHistory.slice(0,10);
@@ -3462,10 +3473,15 @@ function renderRouteHistory() {
       </div>`).join('');
 }
 
-function removeRouteHistory(id) {
+let isRouteHistSaving = false;
+async function removeRouteHistory(id) {
+  if (isRouteHistSaving) return;
+  isRouteHistSaving = true;
+  markRouteHistDeleted(id);
   routeHistory = routeHistory.filter(h => h.id !== id);
-  saveRouteHistory();
   renderRouteHistory();
+  await saveRouteHistory();
+  isRouteHistSaving = false;
 }
 
 async function loadRouteFromHistory(id) {

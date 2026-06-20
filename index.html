@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260620-04</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.81</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1779,18 +1779,21 @@ function findFreeLabelSlot(defaultBox, placed, pinPx) {
 
   const w = defaultBox.w, h = defaultBox.h;
   const candidates = [];
-  // 핀 위쪽
-  candidates.push({ x: pinPx.x - w / 2, y: pinPx.y - h - 26 });
-  // 아래쪽으로 한 줄씩 내려가며 중앙/좌/우 순으로 시도
-  for (let row = 1; row <= 6; row++) {
-    const y = pinPx.y + 4 + row * (h + 3);
-    candidates.push({ x: pinPx.x - w / 2, y });
-    candidates.push({ x: pinPx.x - w / 2 + w * 0.75, y });
-    candidates.push({ x: pinPx.x - w / 2 - w * 0.75, y });
+
+  // 핀을 중심으로 여러 각도(12방향) × 여러 반지름(점점 멀어짐)으로 빈 자리를 찾는다.
+  // 아래쪽으로만 쌓이지 않도록 위/아래/좌/우/대각선을 고르게 시도한다.
+  const ANGLE_COUNT = 12;
+  const RING_COUNT = 6;
+  for (let ring = 0; ring < RING_COUNT; ring++) {
+    const dist = 24 + ring * (h + 8);
+    for (let i = 0; i < ANGLE_COUNT; i++) {
+      // 정북(핀 바로 위)부터 시계방향으로 30도씩
+      const angle = (Math.PI * 2 * i) / ANGLE_COUNT - Math.PI / 2;
+      const cx = pinPx.x + dist * Math.cos(angle);
+      const cy = pinPx.y + dist * Math.sin(angle);
+      candidates.push({ x: cx - w / 2, y: cy - h / 2 });
+    }
   }
-  // 핀 좌/우
-  candidates.push({ x: pinPx.x + 18, y: pinPx.y - h / 2 });
-  candidates.push({ x: pinPx.x - w - 18, y: pinPx.y - h / 2 });
 
   for (const c of candidates) {
     const box = { x: c.x, y: c.y, w, h };
@@ -1888,17 +1891,17 @@ function renderAllMarkers() {
             const labelLatLng = proj.coordsFromPoint(labelCenterPx);
             label = new kakao.maps.CustomOverlay({
               position: labelLatLng,
-              content: `<div style="background:rgba(15,17,23,0.85);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;">${labelText}</div>`,
+              content: `<div style="background:rgba(15,17,23,0.9);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;border:1.5px solid ${color};">${labelText}</div>`,
               yAnchor: 0.5,
               xAnchor: 0.5,
               zIndex: 12
             });
             const leader = new kakao.maps.Polyline({
               path: [pinLatLng, labelLatLng],
-              strokeWeight: 1,
-              strokeColor: '#8b91b5',
-              strokeOpacity: 0.7,
-              strokeStyle: 'shortdash'
+              strokeWeight: 2,
+              strokeColor: color,
+              strokeOpacity: 0.9,
+              strokeStyle: 'solid'
             });
             leader.setMap(map);
             markers[markerId + '_leader'] = leader;

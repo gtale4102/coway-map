@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.86</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.87</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1752,17 +1752,28 @@ function getCategoryName(catId) {
   return cat ? cat.name : '미분류';
 }
 
+// 핀 크기 - 65%로 축소 (라벨 배치 공간 확보 목적). 다른 픽셀 계산도 이 비율에 맞춰 함께 조정됨
+const PIN_SCALE = 0.65;
+const PIN_BASE_W = 38, PIN_BASE_H = 46, PIN_BASE_OFFSET_X = 19, PIN_BASE_OFFSET_Y = 43;
+const PIN_W = Math.round(PIN_BASE_W * PIN_SCALE);
+const PIN_H = Math.round(PIN_BASE_H * PIN_SCALE);
+const PIN_OFFSET_X = Math.round(PIN_BASE_OFFSET_X * PIN_SCALE);
+const PIN_OFFSET_Y = Math.round(PIN_BASE_OFFSET_Y * PIN_SCALE);
+
 function makeMarkerImage(color, ringColor) {
   // ringColor: 라벨이 겹쳐서 옮겨진 핀에 한해, 그 핀-라벨-연결선을 한 색으로 묶어주는 식별 테두리
-  // 캔버스를 살짝 여유있게 잡아 테두리가 잘리지 않도록 함 (핀 본체 크기/위치는 기존과 동일)
+  // viewBox는 원래 비율(38x46) 그대로 두고, 실제 렌더 크기(width/height)만 줄여서
+  // SVG가 비율대로 축소 렌더링하도록 함 (path 좌표를 직접 건드릴 필요 없음)
   const ringAttr = ringColor ? ` stroke="${ringColor}" stroke-width="3"` : '';
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="38" height="46" viewBox="0 0 38 46">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PIN_W}" height="${PIN_H}" viewBox="0 0 ${PIN_BASE_W} ${PIN_BASE_H}">
     <path d="M19 3 C10.163 3 3 10.163 3 19 C3 27 19 43 19 43 C19 43 35 27 35 19 C35 10.163 27.837 3 19 3Z" fill="${color}"${ringAttr}/>
     <circle cx="19" cy="19" r="7" fill="white" opacity="0.9"/>
   </svg>`;
   const encoded = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
-  return new kakao.maps.MarkerImage(encoded, new kakao.maps.Size(38, 46), { offset: new kakao.maps.Point(19, 43) });
+  return new kakao.maps.MarkerImage(encoded, new kakao.maps.Size(PIN_W, PIN_H), { offset: new kakao.maps.Point(PIN_OFFSET_X, PIN_OFFSET_Y) });
 }
+
+
 
 // ==================== 라벨 겹침 자동 회피 (픽셀 단위) ====================
 // 화면에 그려질 위치(픽셀) 기준으로 라벨끼리 겹치는지 판단하고,
@@ -1801,19 +1812,30 @@ function findFreeLabelSlot(defaultBox, placed, pinPx, preferredAngle) {
     ? [...RIGHT_FAN, ...LEFT_FAN, ...VERTICAL_FALLBACK]
     : [...LEFT_FAN, ...RIGHT_FAN, ...VERTICAL_FALLBACK];
 
+  // 박스를 점에 중앙정렬하면 가로폭이 넓은 라벨은 절반이 다시 핀 쪽으로 파고들어
+  // 좌우로 보내는 의미가 없어진다. 그래서 오른쪽 방향이면 박스의 왼쪽 모서리를,
+  // 왼쪽 방향이면 오른쪽 모서리를 기준점에 맞춰서 진짜로 그 방향으로만 뻗어나가게 한다.
+  function boxForAngle(angle, dist) {
+    const cx = pinPx.x + dist * Math.cos(angle);
+    const cy = pinPx.y + dist * Math.sin(angle);
+    const cosA = Math.cos(angle);
+    let x;
+    if (cosA > 0.35) x = cx;           // 오른쪽 계열 - 왼쪽 모서리를 기준점에
+    else if (cosA < -0.35) x = cx - w; // 왼쪽 계열 - 오른쪽 모서리를 기준점에
+    else x = cx - w / 2;               // 수직에 가까우면 중앙 정렬
+    return { x, y: cy - h / 2, w, h };
+  }
+
   const candidates = [];
   const RING_COUNT = 6;
   for (let ring = 0; ring < RING_COUNT; ring++) {
-    const dist = 34 + ring * (h + 16);
+    const dist = 26 + ring * (h + 10);
     for (const angle of angleOrder) {
-      const cx = pinPx.x + dist * Math.cos(angle);
-      const cy = pinPx.y + dist * Math.sin(angle);
-      candidates.push({ x: cx - w / 2, y: cy - h / 2 });
+      candidates.push(boxForAngle(angle, dist));
     }
   }
 
-  for (const c of candidates) {
-    const box = { x: c.x, y: c.y, w, h };
+  for (const box of candidates) {
     if (fits(box)) return box;
   }
   return defaultBox; // 끝까지 못 찾으면 기본 위치 유지 (극히 드문 경우 겹칠 수 있음)
@@ -1868,7 +1890,7 @@ function renderAllMarkers() {
       const px = proj.pointFromCoords(new kakao.maps.LatLng(it.addr.lat, it.addr.lng));
       it.pinPx = px;
       // 핀 이미지(38x46, 하단 중앙이 좌표점)에 맞춘 대략적인 차지 영역
-      placedLabelBoxes.push({ x: px.x - 19, y: px.y - 43, w: 38, h: 46 });
+      placedLabelBoxes.push({ x: px.x - PIN_OFFSET_X, y: px.y - PIN_OFFSET_Y, w: PIN_W, h: PIN_H });
     });
   }
 
@@ -1940,12 +1962,12 @@ function renderAllMarkers() {
             });
             // 연결선은 핀의 뾰족한 좌표점이 아니라, 핀 머리(원형 부분) 테두리에서
             // 라벨이 있는 방향으로 가장 가까운 지점에서 시작하도록 계산
-            const headCenterPx = { x: pinPx.x, y: pinPx.y - 24 }; // 핀 머리(원형) 중심의 대략적 픽셀 위치
+            const headCenterPx = { x: pinPx.x, y: pinPx.y - Math.round(24 * PIN_SCALE) }; // 핀 머리(원형) 중심의 대략적 픽셀 위치
             const labelCenterPx = proj.pointFromCoords(labelLatLng);
             const dx = labelCenterPx.x - headCenterPx.x;
             const dy = labelCenterPx.y - headCenterPx.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-            const PIN_HEAD_R = 18; // 핀 머리 반지름보다 살짝 크게 잡아 테두리 바로 바깥에서 시작
+            const PIN_HEAD_R = Math.round(18 * PIN_SCALE); // 핀 머리 반지름보다 살짝 크게 잡아 테두리 바로 바깥에서 시작
             const edgePx = new kakao.maps.Point(
               headCenterPx.x + (dx / dist) * PIN_HEAD_R,
               headCenterPx.y + (dy / dist) * PIN_HEAD_R
@@ -1970,7 +1992,7 @@ function renderAllMarkers() {
         if (isOverdue) {
           const badge = new kakao.maps.CustomOverlay({
             position: pinLatLng,
-            content: '<div style="background:#ffd60a;color:#1a1d27;border-radius:50%;width:16px;height:16px;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;margin-top:-40px;margin-left:14px;box-shadow:0 0 0 2px #1a1d27;">!</div>',
+            content: `<div style="background:#ffd60a;color:#1a1d27;border-radius:50%;width:${Math.round(16*PIN_SCALE)}px;height:${Math.round(16*PIN_SCALE)}px;font-size:${Math.round(10*PIN_SCALE)}px;font-weight:900;display:flex;align-items:center;justify-content:center;margin-top:${Math.round(-40*PIN_SCALE)}px;margin-left:${Math.round(14*PIN_SCALE)}px;box-shadow:0 0 0 2px #1a1d27;">!</div>`,
             zIndex: 15
           });
           badge.setMap(map);

@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.92</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.93</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1733,8 +1733,30 @@ function spiderfyPixels(items, proj) {
       const gn = group.length;
       // 인접 핀끼리 호(arc) 거리가 최소 PIN_MIN_GAP_PX는 되도록 반지름을 인원수에 비례해 키움
       const spreadR = Math.max(PIN_MIN_RADIUS_PX, PIN_MIN_GAP_PX / (2 * Math.sin(Math.PI / gn)));
-      group.forEach((idx, k) => {
-        const angle = (2 * Math.PI * k) / gn; // 이미 화면(픽셀) 각도라 별도 변환 불필요
+
+      // 원래(펼치기 전) 위치가 무리 중심에서 어느 방향에 있었는지(진짜 각도)로 정렬한다.
+      // 이렇게 안 하면 배열 순서대로 임의로 좌/우를 배정하게 되어, 실제로는 분명히
+      // 다른 두 위치(예: A가 B보다 서쪽)인데 펼친 뒤에 화면상 좌우가 뒤바뀌어
+      // 보이는 문제가 생긴다 (확대하면 다시 정상으로 보이는 이유: 줌이 바뀌면
+      // 배열 순서 기반의 우연한 결과도 달라지기 때문).
+      const trueAngle = (idx) => {
+        const dx = px[idx].x - cx, dy = px[idx].y - cy;
+        if (Math.abs(dx) < 0.01 && Math.abs(dy) < 0.01) return null; // 완전 동일좌표 - 진짜 각도 없음
+        return Math.atan2(dy, dx);
+      };
+      const ordered = [...group].sort((a, b) => {
+        const ta = trueAngle(a), tb = trueAngle(b);
+        if (ta === null && tb === null) return 0;
+        if (ta === null) return 1;
+        if (tb === null) return -1;
+        return ta - tb;
+      });
+      // 정렬된 첫 항목의 "진짜 각도"를 시작점으로 균등 배치 (0도부터 다시 시작하면
+      // 정렬한 의미가 없어져서 원래 방향과 다시 안 맞게 됨)
+      const baseAngle = trueAngle(ordered[0]) ?? 0;
+
+      ordered.forEach((idx, k) => {
+        const angle = baseAngle + (2 * Math.PI * k) / gn; // 이미 화면(픽셀) 각도라 별도 변환 불필요
         const nx = cx + spreadR * Math.cos(angle);
         const ny = cy + spreadR * Math.sin(angle);
         const latlng = proj.coordsFromPoint(new kakao.maps.Point(nx, ny));

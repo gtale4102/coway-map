@@ -15,6 +15,7 @@
 <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=1f8090d36c43b8db729e5495eb0a0d59&libraries=services&autoload=false"></script>
 <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -602,7 +603,7 @@
   }
   .route-summary {
     padding: 6px 12px;
-    font-size: 12px; color: var(--text2);
+    font-size: 14px; font-weight: 700; color: var(--accent);
     border-top: 1px solid var(--border);
     flex-shrink: 0;
   }
@@ -879,7 +880,8 @@
   <div class="sheet-body">
     <div class="form-group">
       <label class="form-label">날짜</label>
-      <input type="date" class="form-input" id="daily-date-input" onchange="renderTodayLogs()">
+      <input type="date" class="form-input" id="daily-date-input" onchange="updateDateWeekdayLabel(); renderTodayLogs()">
+      <div id="daily-date-weekday" style="margin-top:4px; font-size:12px; color:var(--text2);"></div>
     </div>
     <div class="form-group">
       <label class="form-label">고객사 검색</label>
@@ -895,7 +897,7 @@
       <div class="quick-log-grid">
         <div class="quick-log-btn" id="ql-visit" onclick="selectLogType('visit')">🚗 방문</div>
         <div class="quick-log-btn" id="ql-call" onclick="selectLogType('call')">📞 전화</div>
-        <div class="quick-log-btn" id="ql-sms" onclick="selectLogType('sms')">💬 문자</div>
+        <div class="quick-log-btn" id="ql-sms" onclick="selectLogType('sms')">💬 메시지</div>
       </div>
     </div>
     <div class="form-group">
@@ -928,7 +930,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-11</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-14</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -981,6 +983,13 @@
     </div>
     <div class="setting-row">
       <div class="setting-info">
+        <div class="setting-title">엑셀 양식 다운로드</div>
+        <div class="setting-desc">컨택유형/분류는 드롭다운으로 선택하는 양식</div>
+      </div>
+      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="downloadExcelTemplate()">양식 받기</button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
         <div class="setting-title">고객사 일괄 가져오기</div>
         <div class="setting-desc">엑셀 양식으로 여러 고객사 한번에 추가</div>
       </div>
@@ -1016,7 +1025,7 @@
         <option value="all">전체</option>
         <option value="visit">방문</option>
         <option value="call">전화</option>
-        <option value="sms">문자</option>
+        <option value="sms">메시지</option>
       </select>
     </div>
     <div style="display:flex; gap:6px; margin-bottom:12px;">
@@ -1797,7 +1806,7 @@ function openDetail(id, origin) {
     ? '<div class="empty-state"><div>📭</div>컨택 이력이 없습니다</div>'
     : recentLogs.map(l => `
       <div class="log-row">
-        <span class="log-type-badge log-type-${l.type}">${l.type === 'visit' ? '방문' : l.type === 'call' ? '전화' : '문자'}</span>
+        <span class="log-type-badge log-type-${l.type}">${l.type === 'visit' ? '방문' : l.type === 'call' ? '전화' : '메시지'}</span>
         <span class="log-date">${l.date}</span>
         <span class="log-memo">${l.memo || ''}</span>
       </div>`).join('');
@@ -1818,7 +1827,7 @@ function openDetail(id, origin) {
         <div class="contact-stat-value" style="color:var(--success)">${lastCall ? lastCall.date.slice(5) : '—'}</div>
       </div>
       <div class="contact-stat">
-        <div class="contact-stat-label">최종 문자</div>
+        <div class="contact-stat-label">최종 메시지</div>
         <div class="contact-stat-value" style="color:var(--warning)">${lastSms ? lastSms.date.slice(5) : '—'}</div>
       </div>
     </div>
@@ -2120,11 +2129,28 @@ async function deleteCustomer(id) {
 }
 
 // ==================== DAILY LOG ====================
+const WEEKDAY_KR = ['일','월','화','수','목','금','토'];
+
+// 날짜 입력값(YYYY-MM-DD) 옆에 "YYYY-MM-DD (요일)" 형식으로 직접 계산해 표시
+// 브라우저/OS 네이티브 날짜 입력 컨트롤의 표시 방식에 기대지 않고
+// PC·모바일에서 항상 동일한 형식이 보이도록 함
+function updateDateWeekdayLabel() {
+  const input = document.getElementById('daily-date-input');
+  const label = document.getElementById('daily-date-weekday');
+  if (!input || !label) return;
+  const v = input.value;
+  if (!v) { label.textContent = ''; return; }
+  const [y, m, d] = v.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  label.textContent = `${v} (${WEEKDAY_KR[dt.getDay()]})`;
+}
+
 function setupDailySheet(prefillId, prefillName) {
   const dateInput = document.getElementById('daily-date-input');
   if (!dateInput.value) {
     dateInput.value = new Date().toISOString().slice(0,10);
   }
+  updateDateWeekdayLabel();
   // 검색창 초기화 또는 프리필
   if (prefillId) {
     document.getElementById('daily-search').value = prefillName;
@@ -2199,7 +2225,7 @@ function renderTodayLogs() {
   } else {
     container.innerHTML = dayLogs.map(l => `
       <div class="log-row">
-        <span class="log-type-badge log-type-${l.type}">${l.type === 'visit' ? '방문' : l.type === 'call' ? '전화' : '문자'}</span>
+        <span class="log-type-badge log-type-${l.type}">${l.type === 'visit' ? '방문' : l.type === 'call' ? '전화' : '메시지'}</span>
         <span class="log-memo" style="font-weight:600;">${l.customerName}</span>
         <span class="log-memo">${l.memo || ''}</span>
       </div>`).join('');
@@ -2774,6 +2800,72 @@ function importData(e) {
   reader.readAsText(file);
 }
 
+// ==================== EXCEL 양식 다운로드 (ExcelJS - 드롭다운 포함) ====================
+async function downloadExcelTemplate() {
+  try {
+    const wb = new ExcelJS.Workbook();
+
+    // 안내 시트
+    const infoSheet = wb.addWorksheet('안내');
+    infoSheet.columns = [{ width: 90 }];
+    const infoLines = [
+      '■ 고객사데이터 시트 작성 안내',
+      '',
+      '· 고객사명 : 필수. 같은 고객사명을 쓴 행은 자동으로 하나의 고객사로 묶입니다.',
+      '· 주소가 여러 곳이면, 같은 고객사명으로 행을 추가해 한 줄에 주소 1개씩 입력하세요.',
+      '· 컨택이력도 여러 건이면 같은 방식으로 행을 추가하세요. (주소칸은 비워두고 컨택날짜만 입력해도 됩니다)',
+      '· 소유자 : 태일 또는 정열. 비워두면 현재 로그인한 사용자로 등록됩니다.',
+      '· 분류 / 컨택유형 : 드롭다운 화살표를 눌러 목록에서 선택하세요 (오기입 방지).',
+      '· 컨택날짜 형식 : YYYY-MM-DD (예: 2026-06-19)',
+    ];
+    infoLines.forEach((line, i) => {
+      const cell = infoSheet.getCell(i + 1, 1);
+      cell.value = line;
+      if (i === 0) cell.font = { bold: true, size: 13 };
+    });
+
+    // 데이터 시트
+    const ws = wb.addWorksheet('고객사데이터');
+    const headers = ['고객사명', '소유자', '분류', '메모', '담당자명', '연락처', '주소구분', '주소', '상세주소', '컨택날짜', '컨택유형', '컨택메모'];
+    ws.columns = headers.map(h => ({ header: h, key: h, width: h === '메모' || h === '컨택메모' || h === '주소' ? 28 : 14 }));
+    ws.getRow(1).font = { bold: true };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E9F2' } };
+
+    const catNames = categories.map(c => c.name).filter(Boolean);
+    const catList = '"' + catNames.join(',') + '"';
+    const typeList = '"방문,전화,메시지"';
+
+    const colIndex = (name) => headers.indexOf(name) + 1; // 1-based
+
+    const ROWS = 50;
+    for (let r = 2; r <= ROWS + 1; r++) {
+      ws.getCell(r, colIndex('분류')).dataValidation = {
+        type: 'list', allowBlank: true, formulae: [catList],
+        showErrorMessage: true, errorTitle: '분류 오류', error: '목록에 있는 분류명만 선택할 수 있습니다.'
+      };
+      ws.getCell(r, colIndex('컨택유형')).dataValidation = {
+        type: 'list', allowBlank: true, formulae: [typeList],
+        showErrorMessage: true, errorTitle: '컨택유형 오류', error: '방문/전화/메시지 중에서 선택할 수 있습니다.'
+      };
+    }
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '고객사_일괄등록_양식.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('양식 다운로드 완료');
+  } catch (err) {
+    console.error('template generation error', err);
+    showToast('양식 생성 중 오류가 발생했습니다');
+  }
+}
+
 // ==================== EXCEL 일괄 가져오기 ====================
 async function handleExcelImport(e) {
   const file = e.target.files[0];
@@ -2787,7 +2879,7 @@ async function handleExcelImport(e) {
   const reader = new FileReader();
   reader.onload = async (ev) => {
     try {
-      const wb = XLSX.read(ev.target.result, { type: 'array' });
+      const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
       const sheetName = wb.SheetNames.find(n => n.includes('고객사')) || wb.SheetNames[0];
       const sheet = wb.Sheets[sheetName];
       const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
@@ -2833,6 +2925,7 @@ async function processExcelImport(rows) {
   const total = order.length;
   let done = 0;
   const geocodeFailed = [];
+  const typeSkipped = [];
   const newCustomers = [];
 
   for (const name of order) {
@@ -2886,13 +2979,36 @@ async function processExcelImport(rows) {
 
     const firstAddr = addresses.find(a => a.lat);
 
+    // 컨택이력 - 행마다 0~1개, 주소와 같은 행이든 별도 행이든 독립적으로 처리
+    const TYPE_MAP = { '방문': 'visit', '전화': 'call', '메시지': 'sms', '문자': 'sms' };
+    const logs = [];
+    for (const r of groupRows) {
+      const logDateRaw = getCol(r, ['컨택날짜']);
+      if (!logDateRaw) continue;
+      let logDate = logDateRaw;
+      // 엑셀 날짜가 Date객체/일련번호로 들어오는 경우 YYYY-MM-DD로 변환
+      if (r['컨택날짜'] instanceof Date) {
+        logDate = r['컨택날짜'].toISOString().slice(0, 10);
+      } else if (/^\d{4}-\d{2}-\d{2}/.test(logDateRaw)) {
+        logDate = logDateRaw.slice(0, 10);
+      }
+      const typeRaw = getCol(r, ['컨택유형']);
+      const logType = TYPE_MAP[typeRaw];
+      const logMemo = getCol(r, ['컨택메모']);
+      if (!logType) {
+        typeSkipped.push({ name, date: logDate, memo: logMemo });
+        continue; // 유형 불명확 - 임의 추측 등록하지 않고 건너뜀
+      }
+      logs.push({ type: logType, date: logDate, memo: logMemo });
+    }
+
     newCustomers.push({
       id: 'cst_' + Date.now() + '_' + Math.floor(Math.random()*1000),
       name, category: categoryId, memo, contacts, addresses,
       lat: firstAddr ? firstAddr.lat : null,
       lng: firstAddr ? firstAddr.lng : null,
       owner,
-      logs: [],
+      logs,
       createdAt: new Date().toISOString()
     });
 
@@ -2906,15 +3022,24 @@ async function processExcelImport(rows) {
   renderListBody();
 
   // 결과 화면
+  const totalLogs = newCustomers.reduce((sum, c) => sum + c.logs.length, 0);
   let resultHtml = `<div style="padding:8px 0;">
     <div style="font-size:14px; font-weight:700; margin-bottom:4px;">✅ ${newCustomers.length}개 고객사 추가 완료</div>
-    <div style="font-size:12px; color:var(--text2); margin-bottom:12px;">저장이 확인되었습니다</div>`;
+    <div style="font-size:12px; color:var(--text2); margin-bottom:12px;">컨택이력 ${totalLogs}건 포함 · 저장이 확인되었습니다</div>`;
 
   if (geocodeFailed.length > 0) {
     resultHtml += `<div class="section-divider">⚠️ 주소 변환 실패 (${geocodeFailed.length}건)</div>
       <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">아래 주소는 지도에 핀이 표시되지 않습니다. 고객사 수정 화면에서 주소를 다시 검색해주세요.</div>`;
     geocodeFailed.forEach(f => {
       resultHtml += `<div class="contact-row"><div><div style="font-weight:600;font-size:13px;">${f.name}</div><div style="font-size:12px;color:var(--text2);">${f.address}</div></div></div>`;
+    });
+  }
+
+  if (typeSkipped.length > 0) {
+    resultHtml += `<div class="section-divider">⚠️ 컨택유형 미상으로 건너뜀 (${typeSkipped.length}건)</div>
+      <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">컨택유형이 방문/전화/메시지 중 하나로 명확하지 않아 등록하지 않았습니다. 원본 엑셀에서 컨택유형을 채운 뒤 다시 가져와주세요.</div>`;
+    typeSkipped.forEach(t => {
+      resultHtml += `<div class="contact-row"><div><div style="font-weight:600;font-size:13px;">${t.name}</div><div style="font-size:12px;color:var(--text2);">${t.date}${t.memo ? ' · ' + t.memo : ''}</div></div></div>`;
     });
   }
 
@@ -2994,7 +3119,7 @@ function renderHistoryBody() {
     allLogs.sort((a, b) => b.date.localeCompare(a.date));
     body.innerHTML = allLogs.map(l => `
       <div class="log-row" style="cursor:pointer;" onclick="openDetail('${l.customerId}'); closeSheet('history-sheet');">
-        <span class="log-type-badge log-type-${l.type}">${l.type==='visit'?'방문':l.type==='call'?'전화':'문자'}</span>
+        <span class="log-type-badge log-type-${l.type}">${l.type==='visit'?'방문':l.type==='call'?'전화':'메시지'}</span>
         <span style="font-size:12px;color:var(--text2);white-space:nowrap;">${l.date}</span>
         <span class="legend-dot" style="background:${l.color};width:8px;height:8px;flex-shrink:0;"></span>
         <span class="log-memo" style="font-weight:600;">${l.customerName}</span>
@@ -3019,7 +3144,7 @@ function renderHistoryBody() {
         </div>
         ${g.logs.map(l => `
           <div class="log-row" style="padding-left:14px;">
-            <span class="log-type-badge log-type-${l.type}">${l.type==='visit'?'방문':l.type==='call'?'전화':'문자'}</span>
+            <span class="log-type-badge log-type-${l.type}">${l.type==='visit'?'방문':l.type==='call'?'전화':'메시지'}</span>
             <span style="font-size:12px;color:var(--text2);white-space:nowrap;">${l.date}</span>
             <span class="log-memo" style="color:var(--text2);">${l.memo||''}</span>
           </div>`).join('')}
@@ -3064,7 +3189,7 @@ function exportHistoryPDF() {
 
   closeAllSheets();
 
-  const typeLabel = { visit: '방문', call: '전화', sms: '문자' };
+  const typeLabel = { visit: '방문', call: '전화', sms: '메시지' };
   const todayStr = new Date().toLocaleDateString('ko-KR');
 
   let html = `<!DOCTYPE html>

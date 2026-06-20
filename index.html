@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260620-02</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260620-04</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1588,7 +1588,19 @@ function initMap() {
         map: map,
         averageCenter: true,
         minLevel: CLUSTER_MIN_LEVEL,
-        disableClickZoom: false
+        disableClickZoom: false,
+        calculator: [10, 30],
+        styles: [
+          { width: '36px', height: '36px', background: 'rgba(79,124,255,0.92)', borderRadius: '18px',
+            color: '#fff', textAlign: 'center', fontWeight: '800', fontSize: '13px', lineHeight: '36px',
+            border: '2px solid rgba(255,255,255,0.5)' },
+          { width: '44px', height: '44px', background: 'rgba(124,92,252,0.92)', borderRadius: '22px',
+            color: '#fff', textAlign: 'center', fontWeight: '800', fontSize: '14px', lineHeight: '44px',
+            border: '2px solid rgba(255,255,255,0.5)' },
+          { width: '52px', height: '52px', background: 'rgba(220,38,38,0.92)', borderRadius: '26px',
+            color: '#fff', textAlign: 'center', fontWeight: '800', fontSize: '15px', lineHeight: '52px',
+            border: '2px solid rgba(255,255,255,0.5)' }
+        ]
       });
     } catch (clusterErr) {
       console.error('clusterer init failed, falling back to individual markers', clusterErr);
@@ -1748,6 +1760,45 @@ function makeMarkerImage(color) {
   return new kakao.maps.MarkerImage(encoded, new kakao.maps.Size(32, 40), { offset: new kakao.maps.Point(16, 40) });
 }
 
+// ==================== 라벨 겹침 자동 회피 (픽셀 단위) ====================
+// 화면에 그려질 위치(픽셀) 기준으로 라벨끼리 겹치는지 판단하고,
+// 겹치면 빈 자리를 찾아 옮긴다. 옮긴 라벨은 원래 핀까지 가는 가는 선으로 연결한다.
+function estimateLabelBox(text) {
+  const w = Math.max(28, text.length * 12 + 14); // 한글 위주 폰트 기준 추정 너비
+  const h = 22;
+  return { w, h };
+}
+
+function boxesOverlap(a, b) {
+  return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
+}
+
+function findFreeLabelSlot(defaultBox, placed, pinPx) {
+  const fits = (box) => !placed.some(p => boxesOverlap(box, p));
+  if (fits(defaultBox)) return defaultBox;
+
+  const w = defaultBox.w, h = defaultBox.h;
+  const candidates = [];
+  // 핀 위쪽
+  candidates.push({ x: pinPx.x - w / 2, y: pinPx.y - h - 26 });
+  // 아래쪽으로 한 줄씩 내려가며 중앙/좌/우 순으로 시도
+  for (let row = 1; row <= 6; row++) {
+    const y = pinPx.y + 4 + row * (h + 3);
+    candidates.push({ x: pinPx.x - w / 2, y });
+    candidates.push({ x: pinPx.x - w / 2 + w * 0.75, y });
+    candidates.push({ x: pinPx.x - w / 2 - w * 0.75, y });
+  }
+  // 핀 좌/우
+  candidates.push({ x: pinPx.x + 18, y: pinPx.y - h / 2 });
+  candidates.push({ x: pinPx.x - w - 18, y: pinPx.y - h / 2 });
+
+  for (const c of candidates) {
+    const box = { x: c.x, y: c.y, w, h };
+    if (fits(box)) return box;
+  }
+  return defaultBox; // 끝까지 못 찾으면 기본 위치 유지 (극히 드문 경우 겹칠 수 있음)
+}
+
 function renderAllMarkers() {
   // clear existing
   Object.values(markers).forEach(m => m.setMap(null));
@@ -1784,6 +1835,8 @@ function renderAllMarkers() {
   spiderfyAddrs(items.map(it => it.addr));
 
   const clusterMarkers = [];
+  const placedLabelBoxes = [];
+  const proj = map ? map.getProjection() : null;
 
   items.forEach(({ c, idx, addr }) => {
     try {
@@ -1808,15 +1861,48 @@ function renderAllMarkers() {
 
       // 많이 축소되어 클러스터링 중일 땐 라벨/배지를 생략해 혼잡을 줄임
       if (!isClusterZoom) {
-        // 고객사명 라벨
-        if (showLabels) {
+        // 고객사명 라벨 - 겹치면 빈 자리로 옮기고 핀까지 선으로 연결
+        if (showLabels && proj) {
           const labelText = c.name + (addr.label ? ' (' + addr.label + ')' : '');
-          const label = new kakao.maps.CustomOverlay({
-            position: new kakao.maps.LatLng(addr.lat, addr.lng),
-            content: `<div style="background:rgba(15,17,23,0.85);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;margin-top:4px;transform:translateY(4px);">${labelText}</div>`,
-            yAnchor: 0,
-            zIndex: 10
-          });
+          const pinLatLng = new kakao.maps.LatLng(addr.lat, addr.lng);
+          const pinPx = proj.pointFromCoords(pinLatLng);
+          const size = estimateLabelBox(labelText);
+          const defaultBox = { x: pinPx.x - size.w / 2, y: pinPx.y + 4, w: size.w, h: size.h };
+          const finalBox = findFreeLabelSlot(defaultBox, placedLabelBoxes, pinPx);
+          placedLabelBoxes.push(finalBox);
+
+          const moved = (finalBox.x !== defaultBox.x || finalBox.y !== defaultBox.y);
+
+          let label;
+          if (!moved) {
+            // 안 겹치는 일반적인 경우 - 기존과 동일한 모양 유지
+            label = new kakao.maps.CustomOverlay({
+              position: pinLatLng,
+              content: `<div style="background:rgba(15,17,23,0.85);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;margin-top:4px;transform:translateY(4px);">${labelText}</div>`,
+              yAnchor: 0,
+              zIndex: 10
+            });
+          } else {
+            // 겹쳐서 옮긴 경우 - 옮긴 자리에 표시 + 핀까지 연결선
+            const labelCenterPx = new kakao.maps.Point(finalBox.x + finalBox.w / 2, finalBox.y + finalBox.h / 2);
+            const labelLatLng = proj.coordsFromPoint(labelCenterPx);
+            label = new kakao.maps.CustomOverlay({
+              position: labelLatLng,
+              content: `<div style="background:rgba(15,17,23,0.85);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;">${labelText}</div>`,
+              yAnchor: 0.5,
+              xAnchor: 0.5,
+              zIndex: 12
+            });
+            const leader = new kakao.maps.Polyline({
+              path: [pinLatLng, labelLatLng],
+              strokeWeight: 1,
+              strokeColor: '#8b91b5',
+              strokeOpacity: 0.7,
+              strokeStyle: 'shortdash'
+            });
+            leader.setMap(map);
+            markers[markerId + '_leader'] = leader;
+          }
           label.setMap(map);
           markers[markerId + '_label'] = label;
         }
@@ -2799,16 +2885,24 @@ async function saveCategories() {
 }
 
 // ==================== COLOR PICKER ====================
+let pendingCustomColor = null;
+
 function openColorPicker(e, catIdx) {
   currentColorTarget = catIdx;
+  pendingCustomColor = null;
   const cp = document.getElementById('color-picker');
   const currentColor = categories[catIdx] ? categories[catIdx].color : '#000000';
   cp.innerHTML = PALETTE.map(col =>
     `<div class="cp-swatch" style="background:${col}" onclick="pickColor('${col}')"></div>`
   ).join('') + `
-    <div style="width:100%; display:flex; align-items:center; gap:6px; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
-      <input type="color" id="cp-custom-color" value="${currentColor}" title="직접 색상 선택" style="width:32px; height:28px; padding:0; border:none; border-radius:6px; background:none; cursor:pointer; flex-shrink:0;" oninput="pickColor(this.value)" onclick="event.stopPropagation()">
-      <input type="text" id="cp-custom-hex" placeholder="#RRGGBB" maxlength="7" style="flex:1; min-width:0; background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; color:var(--text); outline:none;" onkeydown="if(event.key==='Enter'){ event.stopPropagation(); applyHexColor(this.value); }" onclick="event.stopPropagation()">
+    <div style="width:100%; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
+      <div style="font-size:11px; color:var(--text2); margin-bottom:6px;">직접 선택 (눌러봐도 바로 적용 안 됨)</div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <input type="color" id="cp-custom-color" value="${currentColor}" title="직접 색상 선택" style="width:32px; height:28px; padding:0; border:none; border-radius:6px; background:none; cursor:pointer; flex-shrink:0;" oninput="previewCustomColor(this.value)" onclick="event.stopPropagation()">
+        <input type="text" id="cp-custom-hex" placeholder="#RRGGBB" maxlength="7" style="flex:1; min-width:0; background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; color:var(--text); outline:none;" oninput="previewCustomColor(this.value)" onkeydown="if(event.key==='Enter'){ event.stopPropagation(); confirmCustomColor(); }" onclick="event.stopPropagation()">
+        <div id="cp-preview" style="width:28px; height:28px; border-radius:50%; flex-shrink:0; background:${currentColor}; border:1px solid var(--border);"></div>
+      </div>
+      <button onclick="event.stopPropagation(); confirmCustomColor();" style="width:100%; margin-top:8px; padding:7px; border-radius:8px; border:none; background:var(--accent); color:#fff; font-size:13px; font-weight:700; cursor:pointer;">확인</button>
     </div>`;
 
   cp.classList.add('open');
@@ -2823,7 +2917,7 @@ function openColorPicker(e, catIdx) {
 
   if (left < 8) left = 8;
   if (left + 220 > vw - 8) left = vw - 228;
-  if (top + 170 > vh - 8) top = e.clientY - 180;
+  if (top + 220 > vh - 8) top = e.clientY - 230;
 
   cp.style.left = left + 'px';
   cp.style.top = top + 'px';
@@ -2831,14 +2925,23 @@ function openColorPicker(e, catIdx) {
   e.stopPropagation();
 }
 
-function applyHexColor(val) {
+// 입력값을 미리보기 동그라미에만 반영, 실제 분류 색상엔 아직 적용 안 함
+function previewCustomColor(val) {
   const v = val.trim();
-  const isValid = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v);
-  if (!isValid) {
-    showToast('올바른 색상코드를 입력하세요 (예: #4C88F5)');
+  if (/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v)) {
+    pendingCustomColor = v;
+    const preview = document.getElementById('cp-preview');
+    if (preview) preview.style.background = v;
+  }
+}
+
+// "확인" 버튼을 눌러야 실제로 적용되고 팝업이 닫힘
+function confirmCustomColor() {
+  if (!pendingCustomColor) {
+    showToast('적용할 색상을 먼저 골라주세요');
     return;
   }
-  pickColor(v);
+  pickColor(pendingCustomColor);
 }
 
 function pickColor(col) {

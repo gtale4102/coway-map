@@ -12,7 +12,7 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>고객사 지도</title>
-<script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=1f8090d36c43b8db729e5495eb0a0d59&libraries=services&autoload=false"></script>
+<script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=1f8090d36c43b8db729e5495eb0a0d59&libraries=services,clusterer&autoload=false"></script>
 <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
@@ -516,7 +516,7 @@
     padding: 12px;
     display: none;
     flex-wrap: wrap; gap: 8px;
-    width: 200px;
+    width: 220px;
   }
   .color-picker-popup.open { display: flex; }
   .cp-swatch {
@@ -656,6 +656,35 @@
   .geocode-status { font-size: 11px; color: var(--text2); margin-top: 4px; }
   .geocode-status.ok { color: var(--success); }
   .geocode-status.err { color: var(--danger); }
+
+  /* PC 화면 - 모바일 기준으로 만들어진 패널들이 화면 끝까지 늘어나지 않도록 폭 제한 */
+  @media (min-width: 700px) {
+    .route-panel {
+      left: 16px;
+      right: auto;
+      width: 380px;
+      max-width: calc(100vw - 32px);
+    }
+    .bottom-sheet {
+      left: 50%;
+      right: auto;
+      width: 440px;
+      max-width: calc(100vw - 32px);
+      border-radius: 20px 20px 0 0;
+      transform: translateX(-50%) translateY(100%);
+    }
+    .bottom-sheet.open {
+      transform: translateX(-50%) translateY(0);
+    }
+    #address-search-overlay {
+      left: 50% !important;
+      right: auto !important;
+      transform: translateX(-50%);
+      width: 440px;
+      max-width: calc(100vw - 32px);
+      box-shadow: 0 0 0 1px var(--border), 0 8px 32px rgba(0,0,0,0.3);
+    }
+  }
 </style>
 </head>
 <body>
@@ -880,8 +909,10 @@
   <div class="sheet-body">
     <div class="form-group">
       <label class="form-label">날짜</label>
-      <input type="date" class="form-input" id="daily-date-input" onchange="updateDateWeekdayLabel(); renderTodayLogs()">
-      <div id="daily-date-weekday" style="margin-top:4px; font-size:12px; color:var(--text2);"></div>
+      <div style="position:relative;">
+        <input type="date" class="form-input" id="daily-date-input" onchange="updateDateWeekdayLabel(); renderTodayLogs()" style="color:transparent; caret-color:transparent;">
+        <div id="daily-date-weekday" style="position:absolute; left:12px; top:0; height:100%; display:flex; align-items:center; font-size:14px; color:var(--text); pointer-events:none;"></div>
+      </div>
     </div>
     <div class="form-group">
       <label class="form-label">고객사 검색</label>
@@ -930,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260619-14</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v260620-02</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1124,7 +1155,7 @@ const SHEET_URL = 'https://script.google.com/macros/s/AKfycbw2Sk9CRyl2klNZy__zOA
 const SHEET_TOKEN = '4bd56f919030455fc8d6646a2fa703c1';
 
 const DEFAULT_CATEGORIES = [
-  { id: 'c1', name: '계약 중', color: '#2563eb' },    // 파랑
+  { id: 'c1', name: '계약 중', color: '#4C88F5' },    // 파랑 (카카오맵 기본 핀 색상)
   { id: 'c2', name: '잠재 고객', color: '#16a34a' },  // 초록
   { id: 'c3', name: '재계약 예정', color: '#ca8a04' }, // 황금색
   { id: 'c4', name: '휴면', color: '#64748b' },        // 회색
@@ -1214,6 +1245,9 @@ let mapSearchQuery = '';
 let selectedLogType = null;
 let currentColorTarget = null;
 let map = null;
+let clusterer = null;
+// 줌 레벨이 이 값 이상(더 축소된 상태)이면 클러스터링 적용 - 숫자가 클수록 더 축소된 상태
+const CLUSTER_MIN_LEVEL = 9;
 
 async function loadData() {
   return new Promise((resolve) => {
@@ -1546,6 +1580,26 @@ function initMap() {
     };
     map = new kakao.maps.Map(container, options);
 
+    // 마커 클러스터러 - 많이 축소된 화면에서 밀집된 핀을 숫자 버블로 묶어줌
+    // 확대(레벨이 낮아짐)하면 자동으로 풀리고 개별 핀이 다시 표시됨
+    // 라이브러리 로드 실패 등으로 여기서 오류가 나도 지도 자체는 정상 동작해야 하므로 별도 처리
+    try {
+      clusterer = new kakao.maps.MarkerClusterer({
+        map: map,
+        averageCenter: true,
+        minLevel: CLUSTER_MIN_LEVEL,
+        disableClickZoom: false
+      });
+    } catch (clusterErr) {
+      console.error('clusterer init failed, falling back to individual markers', clusterErr);
+      clusterer = null;
+    }
+
+    // 줌 레벨이 클러스터링 경계를 넘나들 때 라벨/배지 표시 여부를 다시 계산
+    kakao.maps.event.addListener(map, 'zoom_changed', () => {
+      renderAllMarkers();
+    });
+
     // 모바일/PC 구분
     if (navigator.geolocation && isMobile) {
       // 모바일: 실시간 현위치 추적
@@ -1634,6 +1688,52 @@ function getCategoryColor(catId) {
   return cat ? cat.color : '#8b91b5';
 }
 
+// ==================== 핀 겹침 자동 펼치기 (spiderfy) ====================
+// 좌표가 SPIDERFY_THRESHOLD_M 이내로 가까운 핀들을 찾아서
+// 중심점 둘레에 원형으로 살짝 벌려서 배치한다. 저장된 실제 데이터(c.addresses)는
+// 건드리지 않고, 화면에 그릴 때만 좌표를 보정한다.
+const SPIDERFY_THRESHOLD_M = 18; // 이 거리 이내면 "겹친 것"으로 간주
+const SPIDERFY_RADIUS_M = 14;    // 펼칠 때 사용하는 반경
+
+function metersToLatDelta(m) { return m / 111320; }
+function metersToLngDelta(m, lat) { return m / (111320 * Math.cos(lat * Math.PI / 180)); }
+
+function haversineMeters(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// addrs: { lat, lng, ... } 객체 배열. lat/lng를 직접(in-place) 보정한다.
+function spiderfyAddrs(addrs) {
+  const used = new Array(addrs.length).fill(false);
+  for (let i = 0; i < addrs.length; i++) {
+    if (used[i]) continue;
+    const group = [i];
+    for (let j = i + 1; j < addrs.length; j++) {
+      if (used[j]) continue;
+      if (haversineMeters(addrs[i].lat, addrs[i].lng, addrs[j].lat, addrs[j].lng) <= SPIDERFY_THRESHOLD_M) {
+        group.push(j);
+      }
+    }
+    if (group.length > 1) {
+      const cLat = group.reduce((s, idx) => s + addrs[idx].lat, 0) / group.length;
+      const cLng = group.reduce((s, idx) => s + addrs[idx].lng, 0) / group.length;
+      group.forEach((idx, k) => {
+        const angle = (2 * Math.PI * k) / group.length;
+        addrs[idx].lat = cLat + metersToLatDelta(SPIDERFY_RADIUS_M) * Math.sin(angle);
+        addrs[idx].lng = cLng + metersToLngDelta(SPIDERFY_RADIUS_M, cLat) * Math.cos(angle);
+        used[idx] = true;
+      });
+    } else {
+      used[i] = true;
+    }
+  }
+}
+
 function getCategoryName(catId) {
   const cat = categories.find(c => c.id === catId);
   return cat ? cat.name : '미분류';
@@ -1652,7 +1752,14 @@ function renderAllMarkers() {
   // clear existing
   Object.values(markers).forEach(m => m.setMap(null));
   markers = {};
+  if (clusterer) clusterer.clear();
 
+  const remindDays = parseInt(localStorage.getItem(REMIND_KEY) || '30');
+  const currentLevel = map ? map.getLevel() : 0;
+  const isClusterZoom = currentLevel >= CLUSTER_MIN_LEVEL;
+
+  // 1차 패스: 필터를 통과한 (고객사, 주소) 항목 수집
+  const items = [];
   customers.forEach(c => {
     try {
       if (!categoryAllMode && !activeFilters.has(c.category)) return;
@@ -1660,57 +1767,79 @@ function renderAllMarkers() {
       if (ownerFilter === 'partner' && c.owner === currentUser) return;
       if (mapSearchQuery && !customerMatchesQuery(c, mapSearchQuery)) return;
 
-      const color = getCategoryColor(c.category);
-      const remindDays = parseInt(localStorage.getItem(REMIND_KEY) || '30');
-      const isOverdue = c.owner === currentUser && checkOverdue(c, remindDays);
-
-      // 주소별 핀 표시
       const addrsWithCoords = (c.addresses || []).filter(a => a.lat && a.lng);
       if (addrsWithCoords.length === 0 && c.lat && c.lng) {
         // 구버전 호환 - 대표 좌표만 있는 경우
         addrsWithCoords.push({ lat: c.lat, lng: c.lng, label: '' });
       }
+      addrsWithCoords.forEach((addr, idx) => {
+        items.push({ c, idx, addr: { lat: addr.lat, lng: addr.lng, label: addr.label } });
+      });
+    } catch (err) {
+      console.error('marker collect error for', c.name, err);
+    }
+  });
 
-    addrsWithCoords.forEach((addr, idx) => {
+  // 좌표가 매우 가까운 항목들을 화면 표시용으로만 살짝 펼침 (원본 데이터는 불변)
+  spiderfyAddrs(items.map(it => it.addr));
+
+  const clusterMarkers = [];
+
+  items.forEach(({ c, idx, addr }) => {
+    try {
+      const color = getCategoryColor(c.category);
+      const isOverdue = c.owner === currentUser && checkOverdue(c, remindDays);
+
       const markerImg = makeMarkerImage(color);
       const marker = new kakao.maps.Marker({
         position: new kakao.maps.LatLng(addr.lat, addr.lng),
         image: markerImg,
         title: c.name + (addr.label ? ' (' + addr.label + ')' : '')
       });
-      marker.setMap(map);
       kakao.maps.event.addListener(marker, 'click', () => openDetail(c.id));
       const markerId = c.id + (idx > 0 ? '_' + idx : '');
       markers[markerId] = marker;
 
-      // 고객사명 라벨
-      if (showLabels) {
-        const labelText = c.name + (addr.label ? ' (' + addr.label + ')' : '');
-        const label = new kakao.maps.CustomOverlay({
-          position: new kakao.maps.LatLng(addr.lat, addr.lng),
-          content: `<div style="background:rgba(15,17,23,0.85);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;margin-top:4px;transform:translateY(4px);">${labelText}</div>`,
-          yAnchor: 0,
-          zIndex: 10
-        });
-        label.setMap(map);
-        markers[markerId + '_label'] = label;
+      if (clusterer) {
+        clusterMarkers.push(marker);
+      } else {
+        marker.setMap(map);
       }
 
-      // 리마인드 표시
-      if (isOverdue) {
-        const badge = new kakao.maps.CustomOverlay({
-          position: new kakao.maps.LatLng(addr.lat, addr.lng),
-          content: '<div style="background:#ffd60a;color:#1a1d27;border-radius:50%;width:16px;height:16px;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;margin-top:-40px;margin-left:14px;box-shadow:0 0 0 2px #1a1d27;">!</div>',
-          zIndex: 15
-        });
-        badge.setMap(map);
-        markers[markerId + '_badge'] = badge;
+      // 많이 축소되어 클러스터링 중일 땐 라벨/배지를 생략해 혼잡을 줄임
+      if (!isClusterZoom) {
+        // 고객사명 라벨
+        if (showLabels) {
+          const labelText = c.name + (addr.label ? ' (' + addr.label + ')' : '');
+          const label = new kakao.maps.CustomOverlay({
+            position: new kakao.maps.LatLng(addr.lat, addr.lng),
+            content: `<div style="background:rgba(15,17,23,0.85);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;margin-top:4px;transform:translateY(4px);">${labelText}</div>`,
+            yAnchor: 0,
+            zIndex: 10
+          });
+          label.setMap(map);
+          markers[markerId + '_label'] = label;
+        }
+
+        // 리마인드 표시
+        if (isOverdue) {
+          const badge = new kakao.maps.CustomOverlay({
+            position: new kakao.maps.LatLng(addr.lat, addr.lng),
+            content: '<div style="background:#ffd60a;color:#1a1d27;border-radius:50%;width:16px;height:16px;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;margin-top:-40px;margin-left:14px;box-shadow:0 0 0 2px #1a1d27;">!</div>',
+            zIndex: 15
+          });
+          badge.setMap(map);
+          markers[markerId + '_badge'] = badge;
+        }
       }
-    });
-    } catch(err) {
+    } catch (err) {
       console.error('marker render error for', c.name, err);
     }
   });
+
+  if (clusterer && clusterMarkers.length > 0) {
+    clusterer.addMarkers(clusterMarkers);
+  }
 }
 
 function toggleLabels() {
@@ -2673,9 +2802,14 @@ async function saveCategories() {
 function openColorPicker(e, catIdx) {
   currentColorTarget = catIdx;
   const cp = document.getElementById('color-picker');
+  const currentColor = categories[catIdx] ? categories[catIdx].color : '#000000';
   cp.innerHTML = PALETTE.map(col =>
     `<div class="cp-swatch" style="background:${col}" onclick="pickColor('${col}')"></div>`
-  ).join('');
+  ).join('') + `
+    <div style="width:100%; display:flex; align-items:center; gap:6px; margin-top:4px; padding-top:8px; border-top:1px solid var(--border);">
+      <input type="color" id="cp-custom-color" value="${currentColor}" title="직접 색상 선택" style="width:32px; height:28px; padding:0; border:none; border-radius:6px; background:none; cursor:pointer; flex-shrink:0;" oninput="pickColor(this.value)" onclick="event.stopPropagation()">
+      <input type="text" id="cp-custom-hex" placeholder="#RRGGBB" maxlength="7" style="flex:1; min-width:0; background:var(--surface2); border:1px solid var(--border); border-radius:6px; padding:5px 8px; font-size:12px; color:var(--text); outline:none;" onkeydown="if(event.key==='Enter'){ event.stopPropagation(); applyHexColor(this.value); }" onclick="event.stopPropagation()">
+    </div>`;
 
   cp.classList.add('open');
 
@@ -2684,17 +2818,27 @@ function openColorPicker(e, catIdx) {
   const vw = window.innerWidth;
   const vh = window.innerHeight;
 
-  let left = e.clientX - 100;
+  let left = e.clientX - 110;
   let top = e.clientY + 10;
 
   if (left < 8) left = 8;
-  if (left + 200 > vw - 8) left = vw - 208;
-  if (top + 120 > vh - 8) top = e.clientY - 130;
+  if (left + 220 > vw - 8) left = vw - 228;
+  if (top + 170 > vh - 8) top = e.clientY - 180;
 
   cp.style.left = left + 'px';
   cp.style.top = top + 'px';
 
   e.stopPropagation();
+}
+
+function applyHexColor(val) {
+  const v = val.trim();
+  const isValid = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(v);
+  if (!isValid) {
+    showToast('올바른 색상코드를 입력하세요 (예: #4C88F5)');
+    return;
+  }
+  pickColor(v);
 }
 
 function pickColor(col) {

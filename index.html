@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.93</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v3.00</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1140,6 +1140,14 @@
 
 <!-- COLOR PICKER POPUP -->
 <div class="color-picker-popup" id="color-picker"></div>
+
+<!-- 같은 주소에 병합된 핀 클릭 시 고객사 선택 팝업 -->
+<div id="merged-pin-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:900; align-items:flex-end; justify-content:center;" onclick="closeMergedChooser(event)">
+  <div style="background:var(--surface); width:100%; max-width:440px; border-radius:16px 16px 0 0; padding:16px; max-height:60vh; overflow-y:auto;" onclick="event.stopPropagation()">
+    <div style="font-size:13px; color:var(--text2); margin-bottom:10px;">같은 주소에 여러 고객사가 있어요. 확인할 곳을 선택하세요.</div>
+    <div id="merged-pin-list"></div>
+  </div>
+</div>
 
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
@@ -1785,14 +1793,19 @@ const PIN_H = Math.round(PIN_BASE_H * PIN_SCALE);
 const PIN_OFFSET_X = Math.round(PIN_BASE_OFFSET_X * PIN_SCALE);
 const PIN_OFFSET_Y = Math.round(PIN_BASE_OFFSET_Y * PIN_SCALE);
 
-function makeMarkerImage(color, ringColor) {
+function makeMarkerImage(color, ringColor, isSpread) {
   // ringColor: 라벨이 겹쳐서 옮겨진 핀에 한해, 그 핀-라벨-연결선을 한 색으로 묶어주는 식별 테두리
+  // isSpread: 핀 자체 위치가 겹침 방지를 위해 보정(spiderfy)된 경우 - 실제 좌표와
+  // 다를 수 있음을 알 수 있도록 반투명하게 표시 (많이 축소된 화면일수록 보정폭이 커짐)
   // viewBox는 원래 비율(38x46) 그대로 두고, 실제 렌더 크기(width/height)만 줄여서
   // SVG가 비율대로 축소 렌더링하도록 함 (path 좌표를 직접 건드릴 필요 없음)
   const ringAttr = ringColor ? ` stroke="${ringColor}" stroke-width="3"` : '';
+  const groupOpen = isSpread ? '<g opacity="0.65">' : '<g>';
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${PIN_W}" height="${PIN_H}" viewBox="0 0 ${PIN_BASE_W} ${PIN_BASE_H}">
+    ${groupOpen}
     <path d="M19 3 C10.163 3 3 10.163 3 19 C3 27 19 43 19 43 C19 43 35 27 35 19 C35 10.163 27.837 3 19 3Z" fill="${color}"${ringAttr}/>
     <circle cx="19" cy="19" r="7" fill="white" opacity="0.9"/>
+    </g>
   </svg>`;
   const encoded = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
   return new kakao.maps.MarkerImage(encoded, new kakao.maps.Size(PIN_W, PIN_H), { offset: new kakao.maps.Point(PIN_OFFSET_X, PIN_OFFSET_Y) });
@@ -1803,9 +1816,10 @@ function makeMarkerImage(color, ringColor) {
 // ==================== 라벨 겹침 자동 회피 (픽셀 단위) ====================
 // 화면에 그려질 위치(픽셀) 기준으로 라벨끼리 겹치는지 판단하고,
 // 겹치면 빈 자리를 찾아 옮긴다. 옮긴 라벨은 원래 핀까지 가는 가는 선으로 연결한다.
-function estimateLabelBox(text) {
-  const w = Math.max(28, text.length * 12 + 14); // 한글 위주 폰트 기준 추정 너비
-  const h = 22;
+function estimateLabelBox(textOrLines) {
+  const lines = Array.isArray(textOrLines) ? textOrLines : [textOrLines];
+  const w = Math.max(28, ...lines.map(t => t.length * 12 + 14)); // 한글 위주 폰트 기준 추정 너비
+  const h = Math.max(22, lines.length * 18 + 6);
   return { w, h };
 }
 
@@ -1817,6 +1831,9 @@ function boxesOverlap(a, b) {
 // 분류(카테고리) 색상과는 별개 - 같은 고객사의 여러 지점이 몰려있어도 서로 구분되도록
 // 색상환에서 36도씩 균등하게 뽑은 색 - 비슷한 색끼리 옆에 붙어서 헷갈리는 일이 없도록 함
 const LABEL_LINK_PALETTE = ['#e65555', '#e6ac55', '#c9c955', '#72e655', '#55e68f', '#55c9e6', '#558fe6', '#7255e6', '#c955e6', '#e6559f'];
+// 같은 주소에 서로 다른 고객사가 있을 때 병합된 핀에 쓰는 전용 색상
+// (각 고객사 분류색이 제각각이라 하나로 섞으면 헷갈리므로 중립색 사용)
+const MERGED_PIN_COLOR = '#8b91b5';
 
 function findFreeLabelSlot(defaultBox, placed, pinPx, preferredAngle, maxDist) {
   const fits = (box) => !placed.some(p => boxesOverlap(box, p));
@@ -1879,7 +1896,7 @@ function renderAllMarkers() {
   const isClusterZoom = currentLevel >= CLUSTER_MIN_LEVEL;
 
   // 1차 패스: 필터를 통과한 (고객사, 주소) 항목 수집
-  const items = [];
+  const rawItems = [];
   customers.forEach(c => {
     try {
       if (!categoryAllMode && !activeFilters.has(c.category)) return;
@@ -1893,12 +1910,46 @@ function renderAllMarkers() {
         addrsWithCoords.push({ lat: c.lat, lng: c.lng, label: '' });
       }
       addrsWithCoords.forEach((addr, idx) => {
-        items.push({ c, idx, addr: { lat: addr.lat, lng: addr.lng, label: addr.label } });
+        rawItems.push({ c, idx, addr: { lat: addr.lat, lng: addr.lng, label: addr.label } });
       });
     } catch (err) {
       console.error('marker collect error for', c.name, err);
     }
   });
+
+  // 2차 패스: 서로 다른 고객사가 거의 동일한 좌표(같은 주소)에 있으면 핀 하나로 병합.
+  // 같은 고객사가 가진 여러 주소는 병합 대상이 아님(원래부터 서로 다른 위치를 의미).
+  const ADDR_MERGE_M = 4; // 이 실거리(m) 이내면 "같은 주소"로 간주
+  function flatDistM(lat1, lng1, lat2, lng2) {
+    const dLat = (lat2 - lat1) * 111320;
+    const dLng = (lng2 - lng1) * 111320 * Math.cos(lat1 * Math.PI / 180);
+    return Math.sqrt(dLat * dLat + dLng * dLng);
+  }
+  const items = [];
+  const usedRaw = new Array(rawItems.length).fill(false);
+  for (let i = 0; i < rawItems.length; i++) {
+    if (usedRaw[i]) continue;
+    const group = [i];
+    for (let j = i + 1; j < rawItems.length; j++) {
+      if (usedRaw[j]) continue;
+      if (rawItems[i].c.id === rawItems[j].c.id) continue; // 같은 고객사는 병합 안 함
+      if (flatDistM(rawItems[i].addr.lat, rawItems[i].addr.lng, rawItems[j].addr.lat, rawItems[j].addr.lng) <= ADDR_MERGE_M) {
+        group.push(j);
+      }
+    }
+    if (group.length > 1) {
+      group.forEach(idx => { usedRaw[idx] = true; });
+      const members = group.map(idx => rawItems[idx]);
+      items.push({
+        merged: true,
+        members,
+        addr: { lat: members[0].addr.lat, lng: members[0].addr.lng, label: '' }
+      });
+    } else {
+      usedRaw[i] = true;
+      items.push(rawItems[i]);
+    }
+  }
 
   const clusterMarkers = [];
   const placedLabelBoxes = [];
@@ -1977,18 +2028,34 @@ function renderAllMarkers() {
   }
 
   items.forEach((item) => {
-    const { c, idx, addr, pinPx, viewAngle, viewMaxR } = item;
+    const { addr, pinPx, viewAngle, viewMaxR } = item;
     try {
-      const color = getCategoryColor(c.category);
-      const isOverdue = c.owner === currentUser && checkOverdue(c, remindDays);
+      // 병합된 핀(같은 주소, 다른 고객사)과 일반 핀을 한 로직으로 다루기 위해
+      // 필요한 값들을 먼저 정규화한다.
+      const isMerged = !!item.merged;
+      const color = isMerged ? MERGED_PIN_COLOR : getCategoryColor(item.c.category);
+      const isOverdue = isMerged
+        ? item.members.some(m => m.c.owner === currentUser && checkOverdue(m.c, remindDays))
+        : (item.c.owner === currentUser && checkOverdue(item.c, remindDays));
       const pinLatLng = new kakao.maps.LatLng(addr.lat, addr.lng);
-      const markerId = c.id + (idx > 0 ? '_' + idx : '');
+      const markerId = isMerged
+        ? 'merged_' + item.members.map(m => m.c.id).join('_')
+        : item.c.id + (item.idx > 0 ? '_' + item.idx : '');
+      const labelLines = isMerged
+        ? item.members.map(m => m.c.name + (m.addr.label ? ' (' + m.addr.label + ')' : ''))
+        : item.c.name + (addr.label ? ' (' + addr.label + ')' : '');
+      const clickHandler = isMerged
+        ? () => openMergedChooser(item.members)
+        : () => openDetail(item.c.id);
+      const titleText = isMerged
+        ? item.members.map(m => m.c.name).join(', ')
+        : item.c.name + (addr.label ? ' (' + addr.label + ')' : '');
 
       // 라벨 위치를 먼저 계산 - 겹쳐서 옮겨야 하면 핀 테두리에 쓸 식별색도 먼저 정한다
       let moved = false;
       let linkColor = null;
       let labelLatLng = null;
-      const labelText = c.name + (addr.label ? ' (' + addr.label + ')' : '');
+      const labelText = labelLines;
 
       if (!isClusterZoom && showLabels && proj) {
         const size = estimateLabelBox(labelText);
@@ -2014,13 +2081,13 @@ function renderAllMarkers() {
         }
       }
 
-      const markerImg = makeMarkerImage(color, linkColor);
+      const markerImg = makeMarkerImage(color, linkColor, typeof addr.groupId === 'number');
       const marker = new kakao.maps.Marker({
         position: pinLatLng,
         image: markerImg,
-        title: c.name + (addr.label ? ' (' + addr.label + ')' : '')
+        title: titleText
       });
-      kakao.maps.event.addListener(marker, 'click', () => openDetail(c.id));
+      kakao.maps.event.addListener(marker, 'click', clickHandler);
       markers[markerId] = marker;
 
       if (clusterer) {
@@ -2031,14 +2098,16 @@ function renderAllMarkers() {
 
       // 많이 축소되어 클러스터링 중일 땐 라벨/배지를 생략해 혼잡을 줄임
       if (!isClusterZoom) {
-        // 고객사명 라벨
+        // 고객사명 라벨 (병합된 핀은 여러 줄로 표시)
+        const labelHtml = (Array.isArray(labelText) ? labelText : [labelText])
+          .map(line => `<div style="white-space:nowrap;">${line}</div>`).join('');
         if (showLabels && proj) {
           let label;
           if (!moved) {
             // 안 겹치는 일반적인 경우 - 기존과 동일한 모양 유지
             label = new kakao.maps.CustomOverlay({
               position: pinLatLng,
-              content: `<div style="background:rgba(15,17,23,0.85);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;margin-top:4px;transform:translateY(4px);">${labelText}</div>`,
+              content: `<div style="background:rgba(15,17,23,0.85);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;margin-top:4px;transform:translateY(4px);">${labelHtml}</div>`,
               yAnchor: 0,
               zIndex: 10
             });
@@ -2046,7 +2115,7 @@ function renderAllMarkers() {
             // 겹쳐서 옮긴 경우 - 핀 테두리와 같은 식별색으로 라벨 테두리 + 연결선 표시
             label = new kakao.maps.CustomOverlay({
               position: labelLatLng,
-              content: `<div style="background:rgba(15,17,23,0.92);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;border:2px solid ${linkColor};">${labelText}</div>`,
+              content: `<div style="background:rgba(15,17,23,0.92);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;border:2px solid ${linkColor};">${labelHtml}</div>`,
               yAnchor: 0.5,
               xAnchor: 0.5,
               zIndex: 12
@@ -2091,7 +2160,7 @@ function renderAllMarkers() {
         }
       }
     } catch (err) {
-      console.error('marker render error for', c.name, err);
+      console.error('marker render error for', item.merged ? '(병합핀)' : item.c.name, err);
     }
   });
 
@@ -2145,6 +2214,24 @@ function renderLegend() {
 }
 
 // ==================== DETAIL ====================
+// 같은 주소에 병합된 핀을 클릭했을 때 어느 고객사를 볼지 고르는 팝업
+function openMergedChooser(members) {
+  const list = document.getElementById('merged-pin-list');
+  list.innerHTML = members.map(m => {
+    const color = getCategoryColor(m.c.category);
+    const addrLabel = m.addr.label ? ` (${m.addr.label})` : '';
+    return `<div class="contact-row" style="cursor:pointer;" onclick="closeMergedChooser(); openDetail('${m.c.id}')">
+      <div style="width:10px; height:10px; border-radius:50%; background:${color}; flex-shrink:0; margin-right:10px;"></div>
+      <div style="font-weight:600; font-size:14px;">${m.c.name}${addrLabel}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('merged-pin-overlay').style.display = 'flex';
+}
+
+function closeMergedChooser(e) {
+  document.getElementById('merged-pin-overlay').style.display = 'none';
+}
+
 function openDetail(id, origin) {
   const c = customers.find(x => x.id === id);
   if (!c) return;

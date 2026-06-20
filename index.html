@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.87</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.88</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1722,6 +1722,7 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
 // addrs: { lat, lng, ... } 객체 배열. lat/lng를 직접(in-place) 보정한다.
 function spiderfyAddrs(addrs) {
   const used = new Array(addrs.length).fill(false);
+  let groupCounter = 0;
   for (let i = 0; i < addrs.length; i++) {
     if (used[i]) continue;
     const group = [i];
@@ -1734,11 +1735,13 @@ function spiderfyAddrs(addrs) {
     if (group.length > 1) {
       const cLat = group.reduce((s, idx) => s + addrs[idx].lat, 0) / group.length;
       const cLng = group.reduce((s, idx) => s + addrs[idx].lng, 0) / group.length;
+      const groupId = groupCounter++;
       group.forEach((idx, k) => {
         const angle = (2 * Math.PI * k) / group.length;
         addrs[idx].lat = cLat + metersToLatDelta(SPIDERFY_RADIUS_M) * Math.sin(angle);
         addrs[idx].lng = cLng + metersToLngDelta(SPIDERFY_RADIUS_M, cLat) * Math.cos(angle);
         addrs[idx].spreadAngle = angle; // 라벨 배치 시 같은 방향을 우선하도록 전달 (위경도 기준 각도)
+        addrs[idx].groupId = groupId;   // 같은 무리인지 식별 - 라벨 탐색 범위를 무리 크기로 제한하는 데 사용
         used[idx] = true;
       });
     } else {
@@ -1792,7 +1795,7 @@ function boxesOverlap(a, b) {
 // 분류(카테고리) 색상과는 별개 - 같은 고객사의 여러 지점이 몰려있어도 서로 구분되도록
 const LABEL_LINK_PALETTE = ['#ff6b6b', '#feca57', '#1dd1a1', '#54a0ff', '#ee5253', '#5f27cd', '#00d2d3', '#ff9f43', '#10ac84', '#576574'];
 
-function findFreeLabelSlot(defaultBox, placed, pinPx, preferredAngle) {
+function findFreeLabelSlot(defaultBox, placed, pinPx, preferredAngle, maxDist) {
   const fits = (box) => !placed.some(p => boxesOverlap(box, p));
   if (fits(defaultBox)) return defaultBox;
 
@@ -1826,10 +1829,13 @@ function findFreeLabelSlot(defaultBox, placed, pinPx, preferredAngle) {
     return { x, y: cy - h / 2, w, h };
   }
 
+  // 탐색 범위는 자기 무리(군집)의 실제 크기로 제한한다 (maxDist).
+  // 이게 없으면 라벨이 멀리까지 밀려나면서 옆/아래에 있는 "다른" 무리의 영역을
+  // 침범해 위아래·좌우 순서가 뒤바뀌어 보일 수 있다.
+  const RING_GAP = h + 10;
+  const cap = (typeof maxDist === 'number') ? maxDist : (26 + 5 * RING_GAP);
   const candidates = [];
-  const RING_COUNT = 6;
-  for (let ring = 0; ring < RING_COUNT; ring++) {
-    const dist = 26 + ring * (h + 10);
+  for (let dist = 26; dist <= cap; dist += RING_GAP) {
     for (const angle of angleOrder) {
       candidates.push(boxForAngle(angle, dist));
     }
@@ -1885,12 +1891,24 @@ function renderAllMarkers() {
   // 장애물 목록에 등록해둔다. 이렇게 해야 1번 핀의 라벨을 배치할 때도
   // 아직 처리 안 한 7번 핀 위치까지 미리 알고 피해서 배치할 수 있다.
   // (먼저 처리된 라벨만 피하는 방식이면, 나중 핀이 먼저 그려진 라벨 밑에 가려질 수 있었음)
+  const groupMaxDist = {}; // groupId -> 그 무리 안에서 핀들끼리 가장 멀리 떨어진 픽셀 거리
   if (!isClusterZoom && showLabels && proj) {
     items.forEach(it => {
       const px = proj.pointFromCoords(new kakao.maps.LatLng(it.addr.lat, it.addr.lng));
       it.pinPx = px;
       // 핀 이미지(38x46, 하단 중앙이 좌표점)에 맞춘 대략적인 차지 영역
       placedLabelBoxes.push({ x: px.x - PIN_OFFSET_X, y: px.y - PIN_OFFSET_Y, w: PIN_W, h: PIN_H });
+    });
+    // 같은 무리(groupId)에 속한 핀들끼리 픽셀상 서로 얼마나 떨어져 있는지로
+    // "이 무리의 실제 크기"를 구한다 - 라벨이 이 범위를 넘어서면 다른 무리를 침범하게 됨
+    items.forEach(it => {
+      if (typeof it.addr.groupId !== 'number') return;
+      const gid = it.addr.groupId;
+      items.forEach(other => {
+        if (other.addr.groupId !== gid) return;
+        const d = Math.hypot(it.pinPx.x - other.pinPx.x, it.pinPx.y - other.pinPx.y);
+        if (!groupMaxDist[gid] || d > groupMaxDist[gid]) groupMaxDist[gid] = d;
+      });
     });
   }
 
@@ -1912,7 +1930,13 @@ function renderAllMarkers() {
         const defaultBox = { x: pinPx.x - size.w / 2, y: pinPx.y + 4, w: size.w, h: size.h };
         // 위경도 기준 각도(북=90도, 동=0도)를 화면 픽셀 각도(y축이 아래로 증가)로 변환
         const preferredAngle = (typeof addr.spreadAngle === 'number') ? -addr.spreadAngle : undefined;
-        const finalBox = findFreeLabelSlot(defaultBox, placedLabelBoxes, pinPx, preferredAngle);
+        // 라벨 탐색 범위를 자기 무리의 실제 픽셀 크기로 제한 - 옆/아래에 있는
+        // 다른 무리 영역을 침범해서 위아래·좌우 순서가 뒤바뀌어 보이는 것을 방지
+        const gid = addr.groupId;
+        const maxDist = (typeof gid === 'number' && groupMaxDist[gid])
+          ? groupMaxDist[gid] / 2 + size.h + 30
+          : undefined;
+        const finalBox = findFreeLabelSlot(defaultBox, placedLabelBoxes, pinPx, preferredAngle, maxDist);
         placedLabelBoxes.push(finalBox);
         moved = (finalBox.x !== defaultBox.x || finalBox.y !== defaultBox.y);
         if (moved) {

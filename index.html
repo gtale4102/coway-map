@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.84</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.85</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1932,8 +1932,22 @@ function renderAllMarkers() {
               xAnchor: 0.5,
               zIndex: 12
             });
+            // 연결선은 핀의 뾰족한 좌표점이 아니라, 핀 머리(원형 부분) 테두리에서
+            // 라벨이 있는 방향으로 가장 가까운 지점에서 시작하도록 계산
+            const headCenterPx = { x: pinPx.x, y: pinPx.y - 24 }; // 핀 머리(원형) 중심의 대략적 픽셀 위치
+            const labelCenterPx = proj.pointFromCoords(labelLatLng);
+            const dx = labelCenterPx.x - headCenterPx.x;
+            const dy = labelCenterPx.y - headCenterPx.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            const PIN_HEAD_R = 18; // 핀 머리 반지름보다 살짝 크게 잡아 테두리 바로 바깥에서 시작
+            const edgePx = new kakao.maps.Point(
+              headCenterPx.x + (dx / dist) * PIN_HEAD_R,
+              headCenterPx.y + (dy / dist) * PIN_HEAD_R
+            );
+            const edgeLatLng = proj.coordsFromPoint(edgePx);
+
             const leader = new kakao.maps.Polyline({
-              path: [pinLatLng, labelLatLng],
+              path: [edgeLatLng, labelLatLng],
               strokeWeight: 2,
               strokeColor: linkColor,
               strokeOpacity: 0.9,

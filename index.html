@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.90</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.91</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1889,7 +1889,7 @@ function renderAllMarkers() {
   // 장애물 목록에 등록해둔다. 이렇게 해야 1번 핀의 라벨을 배치할 때도
   // 아직 처리 안 한 7번 핀 위치까지 미리 알고 피해서 배치할 수 있다.
   // (먼저 처리된 라벨만 피하는 방식이면, 나중 핀이 먼저 그려진 라벨 밑에 가려질 수 있었음)
-  const groupMaxDist = {}; // groupId -> 그 무리 안에서 핀들끼리 가장 멀리 떨어진 픽셀 거리
+  const groupMaxDist = {}; // groupId(실제 좌표 18m 이내 묶음) -> 그 무리의 픽셀 크기
   if (!isClusterZoom && showLabels && proj) {
     items.forEach(it => {
       const px = proj.pointFromCoords(new kakao.maps.LatLng(it.addr.lat, it.addr.lng));
@@ -1908,9 +1908,53 @@ function renderAllMarkers() {
         if (!groupMaxDist[gid] || d > groupMaxDist[gid]) groupMaxDist[gid] = d;
       });
     });
+
+    // ── 화면 픽셀 거리 기준 "시야 무리" 재클러스터링 ──────────────────────
+    // 실제 좌표가 18m 이상 떨어져 있어도(=서로 다른 groupId), 줌이 축소된 화면에서는
+    // 화면상 가깝게 붙어 보일 수 있다. 그런 경우 위 groupId 기준만으로는 서로 다른
+    // 무리로 취급되어 라벨 방향이 따로 놀면서 연결선이 꼬인다.
+    // 그래서 "지금 화면에 실제로 보이는 픽셀 거리"로 다시 묶고, 그 시야 무리 전체의
+    // 중심을 기준으로 각 핀의 방향(몇 시 방향)을 새로 매겨서, 화면상 가까운 핀들끼리는
+    // 항상 일관된 부채살 순서로 라벨이 나가도록 한다.
+    const VIEW_NEIGHBOR_PX = 260;
+    const n = items.length;
+    const visited = new Array(n).fill(false);
+    const viewGroups = [];
+    for (let i = 0; i < n; i++) {
+      if (visited[i]) continue;
+      const queue = [i];
+      visited[i] = true;
+      const members = [];
+      while (queue.length) {
+        const cur = queue.shift();
+        members.push(cur);
+        for (let j = 0; j < n; j++) {
+          if (visited[j]) continue;
+          const d = Math.hypot(items[cur].pinPx.x - items[j].pinPx.x, items[cur].pinPx.y - items[j].pinPx.y);
+          if (d <= VIEW_NEIGHBOR_PX) { visited[j] = true; queue.push(j); }
+        }
+      }
+      viewGroups.push(members);
+    }
+    viewGroups.forEach(members => {
+      if (members.length < 2) return; // 혼자 떨어져 있으면 기존 기본 위치 로직으로 충분
+      const cx = members.reduce((s, idx) => s + items[idx].pinPx.x, 0) / members.length;
+      const cy = members.reduce((s, idx) => s + items[idx].pinPx.y, 0) / members.length;
+      let maxR = 0;
+      members.forEach(idx => {
+        const dx = items[idx].pinPx.x - cx, dy = items[idx].pinPx.y - cy;
+        const r = Math.hypot(dx, dy);
+        maxR = Math.max(maxR, r);
+        // 중심과 거의 같은 위치(자기 자신이 무리 중심에 가까운 경우)면 기존 spreadAngle로 대체
+        items[idx].viewAngle = (r > 2) ? Math.atan2(dy, dx)
+          : (typeof items[idx].addr.spreadAngle === 'number' ? -items[idx].addr.spreadAngle : 0);
+      });
+      members.forEach(idx => { items[idx].viewMaxR = maxR; });
+    });
   }
 
-  items.forEach(({ c, idx, addr, pinPx }) => {
+  items.forEach((item) => {
+    const { c, idx, addr, pinPx, viewAngle, viewMaxR } = item;
     try {
       const color = getCategoryColor(c.category);
       const isOverdue = c.owner === currentUser && checkOverdue(c, remindDays);
@@ -1926,13 +1970,15 @@ function renderAllMarkers() {
       if (!isClusterZoom && showLabels && proj) {
         const size = estimateLabelBox(labelText);
         const defaultBox = { x: pinPx.x - size.w / 2, y: pinPx.y + 4, w: size.w, h: size.h };
-        // 위경도 기준 각도(북=90도, 동=0도)를 화면 픽셀 각도(y축이 아래로 증가)로 변환
-        const preferredAngle = (typeof addr.spreadAngle === 'number') ? -addr.spreadAngle : undefined;
-        // 라벨 탐색 범위를 자기 무리의 실제 픽셀 크기로 제한 - 옆/아래에 있는
-        // 다른 무리 영역을 침범해서 위아래·좌우 순서가 뒤바뀌어 보이는 것을 방지
+        // 화면 픽셀 기준 시야 무리에서 계산한 각도를 최우선으로 쓴다 (줌이 축소돼도
+        // 화면상 가까운 핀들끼리는 일관되게 부채살로 펼쳐지도록). 시야 무리가 없으면
+        // 실제 좌표 18m 이내 무리 기준 각도로, 그것도 없으면 기본값(위쪽)으로.
+        const preferredAngle = (typeof viewAngle === 'number') ? viewAngle
+          : (typeof addr.spreadAngle === 'number') ? -addr.spreadAngle : undefined;
+        // 라벨 탐색 범위도 마찬가지로 화면상 시야 무리의 실제 크기를 우선 기준으로 삼는다.
         const gid = addr.groupId;
-        const maxDist = (typeof gid === 'number' && groupMaxDist[gid])
-          ? groupMaxDist[gid] / 2 + size.h + 30
+        const maxDist = (typeof viewMaxR === 'number') ? viewMaxR + size.h + 30
+          : (typeof gid === 'number' && groupMaxDist[gid]) ? groupMaxDist[gid] / 2 + size.h + 30
           : undefined;
         const finalBox = findFreeLabelSlot(defaultBox, placedLabelBoxes, pinPx, preferredAngle, maxDist);
         placedLabelBoxes.push(finalBox);

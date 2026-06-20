@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.89</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.90</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1816,25 +1816,16 @@ function findFreeLabelSlot(defaultBox, placed, pinPx, preferredAngle, maxDist) {
     return { x, y: cy - h / 2, w, h };
   }
 
-  // 한 바퀴를 15도 간격(24방향)으로 빠짐없이 본다. 그래야 "가까운 빈자리"를
-  // 놓치지 않는다. 다만 같은 거리(반지름) 안에서는 수평에 가까운 방향을 먼저 시도하고,
-  // 그 다음 핀이 벌어진 쪽(선호 좌/우)을 우선해서, 결과적으로 좌우 배치를 선호하되
-  // "더 가까운 자리"가 있으면 그게 위든 아래든 항상 그쪽을 먼저 쓴다.
-  const baseAngles = [];
-  for (let deg = 0; deg < 360; deg += 15) {
-    let a = deg * D;
-    if (a > Math.PI) a -= 2 * Math.PI;
-    baseAngles.push(a);
+  // 같은 무리 안 핀들은 spiderfy에서 이미 서로 다른 고유 각도(몇 시 방향)로
+  // 펼쳐져 있다. 라벨도 "수평이냐 좌우냐"가 아니라 그 핀만의 고유 각도를 그대로
+  // 목표로 삼아서, 핀들의 시계방향 순서가 라벨에도 그대로 유지되게 한다.
+  // 이러면 부채살처럼 펼쳐지면서 같은 무리 안에서는 구조적으로 연결선이 교차하지 않는다.
+  const base = (typeof preferredAngle === 'number') ? preferredAngle : -Math.PI / 2;
+  const deviations = [0];
+  for (let d = 15; d <= 180; d += 15) {
+    deviations.push(d * D, -d * D);
   }
-  const horizontalScore = (a) => Math.min(Math.abs(a), Math.PI - Math.abs(a));
-  const leansRight = (typeof preferredAngle !== 'number') || Math.cos(preferredAngle) >= 0;
-  baseAngles.sort((a, b) => {
-    const sa = horizontalScore(a), sb = horizontalScore(b);
-    if (Math.abs(sa - sb) > 0.01) return sa - sb; // 수평에 가까운 쪽 우선
-    const aRight = Math.cos(a) >= 0, bRight = Math.cos(b) >= 0;
-    if (aRight === bRight) return 0;
-    return (aRight === leansRight) ? -1 : 1; // 선호하는 좌/우 쪽 우선
-  });
+  const baseAngles = deviations.map(dev => base + dev);
 
   // 탐색 범위는 자기 무리(군집)의 실제 크기로 제한한다 (maxDist).
   // 이게 없으면 라벨이 멀리까지 밀려나면서 옆/아래에 있는 "다른" 무리의 영역을

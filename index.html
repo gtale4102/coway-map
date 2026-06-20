@@ -961,7 +961,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.81</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v2.83</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1738,6 +1738,7 @@ function spiderfyAddrs(addrs) {
         const angle = (2 * Math.PI * k) / group.length;
         addrs[idx].lat = cLat + metersToLatDelta(SPIDERFY_RADIUS_M) * Math.sin(angle);
         addrs[idx].lng = cLng + metersToLngDelta(SPIDERFY_RADIUS_M, cLat) * Math.cos(angle);
+        addrs[idx].spreadAngle = angle; // 라벨 배치 시 같은 방향을 우선하도록 전달 (위경도 기준 각도)
         used[idx] = true;
       });
     } else {
@@ -1751,13 +1752,16 @@ function getCategoryName(catId) {
   return cat ? cat.name : '미분류';
 }
 
-function makeMarkerImage(color) {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="40" viewBox="0 0 32 40">
-    <path d="M16 0 C7.163 0 0 7.163 0 16 C0 24 16 40 16 40 C16 40 32 24 32 16 C32 7.163 24.837 0 16 0Z" fill="${color}"/>
-    <circle cx="16" cy="16" r="7" fill="white" opacity="0.9"/>
+function makeMarkerImage(color, ringColor) {
+  // ringColor: 라벨이 겹쳐서 옮겨진 핀에 한해, 그 핀-라벨-연결선을 한 색으로 묶어주는 식별 테두리
+  // 캔버스를 살짝 여유있게 잡아 테두리가 잘리지 않도록 함 (핀 본체 크기/위치는 기존과 동일)
+  const ringAttr = ringColor ? ` stroke="${ringColor}" stroke-width="3"` : '';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="38" height="46" viewBox="0 0 38 46">
+    <path d="M19 3 C10.163 3 3 10.163 3 19 C3 27 19 43 19 43 C19 43 35 27 35 19 C35 10.163 27.837 3 19 3Z" fill="${color}"${ringAttr}/>
+    <circle cx="19" cy="19" r="7" fill="white" opacity="0.9"/>
   </svg>`;
   const encoded = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svg)));
-  return new kakao.maps.MarkerImage(encoded, new kakao.maps.Size(32, 40), { offset: new kakao.maps.Point(16, 40) });
+  return new kakao.maps.MarkerImage(encoded, new kakao.maps.Size(38, 46), { offset: new kakao.maps.Point(19, 43) });
 }
 
 // ==================== 라벨 겹침 자동 회피 (픽셀 단위) ====================
@@ -1773,22 +1777,29 @@ function boxesOverlap(a, b) {
   return !(a.x + a.w < b.x || b.x + b.w < a.x || a.y + a.h < b.y || b.y + b.h < a.y);
 }
 
-function findFreeLabelSlot(defaultBox, placed, pinPx) {
+// 겹쳐서 옮겨진 핀-라벨-연결선을 하나로 묶어 보여주는 식별 색상 팔레트
+// 분류(카테고리) 색상과는 별개 - 같은 고객사의 여러 지점이 몰려있어도 서로 구분되도록
+const LABEL_LINK_PALETTE = ['#ff6b6b', '#feca57', '#1dd1a1', '#54a0ff', '#ee5253', '#5f27cd', '#00d2d3', '#ff9f43', '#10ac84', '#576574'];
+
+function findFreeLabelSlot(defaultBox, placed, pinPx, preferredAngle) {
   const fits = (box) => !placed.some(p => boxesOverlap(box, p));
   if (fits(defaultBox)) return defaultBox;
 
   const w = defaultBox.w, h = defaultBox.h;
-  const candidates = [];
+  // 선호 방향(핀이 벌어진 방향)부터 시작해서 좌우로 번갈아가며 각도를 넓혀간다.
+  // 이러면 같은 무리에 속한 핀들의 라벨이 핀이 벌어진 방향과 같은 쪽으로 모이게 되어
+  // 연결선끼리 서로 교차할 가능성이 크게 줄어든다.
+  const baseAngle = (typeof preferredAngle === 'number') ? preferredAngle : -Math.PI / 2;
+  const STEP = Math.PI / 6; // 30도
+  const angleOffsets = [0, STEP, -STEP, STEP * 2, -STEP * 2, STEP * 3, -STEP * 3,
+                         STEP * 4, -STEP * 4, STEP * 5, -STEP * 5, Math.PI];
 
-  // 핀을 중심으로 여러 각도(12방향) × 여러 반지름(점점 멀어짐)으로 빈 자리를 찾는다.
-  // 아래쪽으로만 쌓이지 않도록 위/아래/좌/우/대각선을 고르게 시도한다.
-  const ANGLE_COUNT = 12;
+  const candidates = [];
   const RING_COUNT = 6;
   for (let ring = 0; ring < RING_COUNT; ring++) {
-    const dist = 24 + ring * (h + 8);
-    for (let i = 0; i < ANGLE_COUNT; i++) {
-      // 정북(핀 바로 위)부터 시계방향으로 30도씩
-      const angle = (Math.PI * 2 * i) / ANGLE_COUNT - Math.PI / 2;
+    const dist = 34 + ring * (h + 16);
+    for (const off of angleOffsets) {
+      const angle = baseAngle + off;
       const cx = pinPx.x + dist * Math.cos(angle);
       const cy = pinPx.y + dist * Math.sin(angle);
       candidates.push({ x: cx - w / 2, y: cy - h / 2 });
@@ -1840,20 +1851,45 @@ function renderAllMarkers() {
   const clusterMarkers = [];
   const placedLabelBoxes = [];
   const proj = map ? map.getProjection() : null;
+  let linkColorIndex = 0;
 
   items.forEach(({ c, idx, addr }) => {
     try {
       const color = getCategoryColor(c.category);
       const isOverdue = c.owner === currentUser && checkOverdue(c, remindDays);
+      const pinLatLng = new kakao.maps.LatLng(addr.lat, addr.lng);
+      const markerId = c.id + (idx > 0 ? '_' + idx : '');
 
-      const markerImg = makeMarkerImage(color);
+      // 라벨 위치를 먼저 계산 - 겹쳐서 옮겨야 하면 핀 테두리에 쓸 식별색도 먼저 정한다
+      let moved = false;
+      let linkColor = null;
+      let labelLatLng = null;
+      const labelText = c.name + (addr.label ? ' (' + addr.label + ')' : '');
+
+      if (!isClusterZoom && showLabels && proj) {
+        const pinPx = proj.pointFromCoords(pinLatLng);
+        const size = estimateLabelBox(labelText);
+        const defaultBox = { x: pinPx.x - size.w / 2, y: pinPx.y + 4, w: size.w, h: size.h };
+        // 위경도 기준 각도(북=90도, 동=0도)를 화면 픽셀 각도(y축이 아래로 증가)로 변환
+        const preferredAngle = (typeof addr.spreadAngle === 'number') ? -addr.spreadAngle : undefined;
+        const finalBox = findFreeLabelSlot(defaultBox, placedLabelBoxes, pinPx, preferredAngle);
+        placedLabelBoxes.push(finalBox);
+        moved = (finalBox.x !== defaultBox.x || finalBox.y !== defaultBox.y);
+        if (moved) {
+          linkColor = LABEL_LINK_PALETTE[linkColorIndex % LABEL_LINK_PALETTE.length];
+          linkColorIndex++;
+          const labelCenterPx = new kakao.maps.Point(finalBox.x + finalBox.w / 2, finalBox.y + finalBox.h / 2);
+          labelLatLng = proj.coordsFromPoint(labelCenterPx);
+        }
+      }
+
+      const markerImg = makeMarkerImage(color, linkColor);
       const marker = new kakao.maps.Marker({
-        position: new kakao.maps.LatLng(addr.lat, addr.lng),
+        position: pinLatLng,
         image: markerImg,
         title: c.name + (addr.label ? ' (' + addr.label + ')' : '')
       });
       kakao.maps.event.addListener(marker, 'click', () => openDetail(c.id));
-      const markerId = c.id + (idx > 0 ? '_' + idx : '');
       markers[markerId] = marker;
 
       if (clusterer) {
@@ -1864,18 +1900,8 @@ function renderAllMarkers() {
 
       // 많이 축소되어 클러스터링 중일 땐 라벨/배지를 생략해 혼잡을 줄임
       if (!isClusterZoom) {
-        // 고객사명 라벨 - 겹치면 빈 자리로 옮기고 핀까지 선으로 연결
+        // 고객사명 라벨
         if (showLabels && proj) {
-          const labelText = c.name + (addr.label ? ' (' + addr.label + ')' : '');
-          const pinLatLng = new kakao.maps.LatLng(addr.lat, addr.lng);
-          const pinPx = proj.pointFromCoords(pinLatLng);
-          const size = estimateLabelBox(labelText);
-          const defaultBox = { x: pinPx.x - size.w / 2, y: pinPx.y + 4, w: size.w, h: size.h };
-          const finalBox = findFreeLabelSlot(defaultBox, placedLabelBoxes, pinPx);
-          placedLabelBoxes.push(finalBox);
-
-          const moved = (finalBox.x !== defaultBox.x || finalBox.y !== defaultBox.y);
-
           let label;
           if (!moved) {
             // 안 겹치는 일반적인 경우 - 기존과 동일한 모양 유지
@@ -1886,12 +1912,10 @@ function renderAllMarkers() {
               zIndex: 10
             });
           } else {
-            // 겹쳐서 옮긴 경우 - 옮긴 자리에 표시 + 핀까지 연결선
-            const labelCenterPx = new kakao.maps.Point(finalBox.x + finalBox.w / 2, finalBox.y + finalBox.h / 2);
-            const labelLatLng = proj.coordsFromPoint(labelCenterPx);
+            // 겹쳐서 옮긴 경우 - 핀 테두리와 같은 식별색으로 라벨 테두리 + 연결선 표시
             label = new kakao.maps.CustomOverlay({
               position: labelLatLng,
-              content: `<div style="background:rgba(15,17,23,0.9);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;border:1.5px solid ${color};">${labelText}</div>`,
+              content: `<div style="background:rgba(15,17,23,0.92);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;border:2px solid ${linkColor};">${labelText}</div>`,
               yAnchor: 0.5,
               xAnchor: 0.5,
               zIndex: 12
@@ -1899,7 +1923,7 @@ function renderAllMarkers() {
             const leader = new kakao.maps.Polyline({
               path: [pinLatLng, labelLatLng],
               strokeWeight: 2,
-              strokeColor: color,
+              strokeColor: linkColor,
               strokeOpacity: 0.9,
               strokeStyle: 'solid'
             });
@@ -1913,7 +1937,7 @@ function renderAllMarkers() {
         // 리마인드 표시
         if (isOverdue) {
           const badge = new kakao.maps.CustomOverlay({
-            position: new kakao.maps.LatLng(addr.lat, addr.lng),
+            position: pinLatLng,
             content: '<div style="background:#ffd60a;color:#1a1d27;border-radius:50%;width:16px;height:16px;font-size:10px;font-weight:900;display:flex;align-items:center;justify-content:center;margin-top:-40px;margin-left:14px;box-shadow:0 0 0 2px #1a1d27;">!</div>',
             zIndex: 15
           });

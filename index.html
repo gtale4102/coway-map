@@ -630,6 +630,21 @@
     z-index: 50;
   }
 
+  .locate-fab {
+    position: absolute;
+    bottom: 196px; right: 16px;
+    width: 46px; height: 46px;
+    border-radius: 50%;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+    z-index: 50;
+  }
+  .locate-fab:active { background: var(--surface2); }
+
   .toast {
     position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%);
     background: var(--surface2); border: 1px solid var(--border);
@@ -776,6 +791,12 @@
       <button onclick="hideRemindBanner()" style="background:none; border:none; color:#fff; font-size:16px; cursor:pointer; padding:0 4px; flex-shrink:0;">✕</button>
     </div>
     <button class="fab" onclick="openAddSheet()">＋</button>
+    <button class="locate-fab" onclick="goToMyLocation()" title="현재 위치로 이동">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="7" stroke="currentColor" stroke-width="2"/>
+        <circle cx="12" cy="12" r="2.2" fill="currentColor"/>
+      </svg>
+    </button>
     <button class="route-fab" onclick="toggleRoutePanel()" title="동선 짜기">🗺️</button>
     <button class="daily-btn" onclick="openSheet('daily-sheet')">📋 컨택 기록</button>
 
@@ -961,7 +982,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v3.00</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v3.01</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1674,6 +1695,23 @@ function showMapErrorOverlay(msg) {
     <button onclick="location.reload()" style="margin-top:8px; padding:10px 20px; background:#4f7cff; color:#fff; border:none; border-radius:8px; font-size:13px; cursor:pointer;">새로고침</button>
   `;
   container.appendChild(overlay);
+}
+
+function goToMyLocation() {
+  if (!navigator.geolocation) {
+    showToast('이 기기에서는 위치 정보를 사용할 수 없습니다');
+    return;
+  }
+  showToast('현재 위치를 가져오는 중...');
+  navigator.geolocation.getCurrentPosition(
+    pos => {
+      const latlng = new kakao.maps.LatLng(pos.coords.latitude, pos.coords.longitude);
+      map.setCenter(latlng);
+      updateMyLocation(latlng);
+    },
+    () => { showToast('현재 위치를 가져올 수 없습니다. 위치 권한을 확인해주세요'); },
+    { enableHighAccuracy: true, timeout: 8000 }
+  );
 }
 
 function updateMyLocation(latlng) {

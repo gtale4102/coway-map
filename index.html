@@ -987,7 +987,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v4.00</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v4.01</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -3874,16 +3874,38 @@ function filterDailyCustomers() {
   if (!q) { results.style.display = 'none'; return; }
   const filtered = customers.filter(c => c.name.toLowerCase().includes(q)).slice(0, 8);
   if (filtered.length === 0) { results.style.display = 'none'; return; }
-  results.innerHTML = filtered.map(c => `
-    <div style="padding:10px 12px; cursor:pointer; font-size:14px; border-bottom:1px solid var(--border);"
-      onmousedown="selectDailyCustomer('${c.id}', '${c.name.replace(/'/g,"\'")}')">
-      <span class="legend-dot" style="background:${getCategoryColor(c.category)};display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;"></span>
-      ${c.name}
-    </div>`).join('');
+  results.innerHTML = filtered.map(c => {
+    const safeName = c.name.replace(/'/g, "\\'");
+    const addrs = c.addresses || [];
+    const dot = `<span class="legend-dot" style="background:${getCategoryColor(c.category)};display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;flex-shrink:0;"></span>`;
+
+    if (addrs.length <= 1) {
+      // 주소가 0~1개면 굳이 펼칠 필요 없이 바로 선택
+      const addrId = addrs[0]?.id || null;
+      return `<div style="padding:10px 12px; cursor:pointer; font-size:14px; border-bottom:1px solid var(--border); display:flex; align-items:center;"
+        onmousedown="selectDailyCustomer('${c.id}', '${safeName}', ${addrId ? `'${addrId}'` : 'null'})">
+        ${dot}${c.name}
+      </div>`;
+    }
+
+    // 주소가 여러 개면 업체명+개수만 먼저 보여주고, 누르면 하위에 주소 목록을 펼친다
+    const subItems = addrs.map(a => `
+      <div style="padding:8px 12px 8px 30px; cursor:pointer; font-size:13px; color:var(--text2); border-bottom:1px solid var(--border);"
+        onmousedown="selectDailyCustomer('${c.id}', '${safeName}', '${a.id}')">
+        └ ${a.label || a.address}
+      </div>`).join('');
+    return `<div>
+      <div style="padding:10px 12px; cursor:pointer; font-size:14px; border-bottom:1px solid var(--border); display:flex; align-items:center;"
+        onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display==='block' ? 'none' : 'block'; this.querySelector('.expand-arrow').textContent = this.nextElementSibling.style.display==='block' ? '▴' : '▾';">
+        ${dot}${c.name} · ${addrs.length}개 주소 <span class="expand-arrow" style="margin-left:auto; color:var(--text2); font-size:11px;">▾</span>
+      </div>
+      <div style="display:none;">${subItems}</div>
+    </div>`;
+  }).join('');
   results.style.display = 'block';
 }
 
-function selectDailyCustomer(id, name) {
+function selectDailyCustomer(id, name, addrId) {
   document.getElementById('daily-customer').value = id;
   document.getElementById('daily-search').value = name;
   document.getElementById('daily-search-results').style.display = 'none';
@@ -3891,6 +3913,12 @@ function selectDailyCustomer(id, name) {
   sel.textContent = '✓ ' + name + ' 선택됨';
   sel.style.display = 'block';
   populateDailyAddressSelect(id);
+  if (addrId) {
+    const addrSel = document.getElementById('daily-address-select');
+    if (addrSel && [...addrSel.options].some(o => o.value === addrId)) {
+      addrSel.value = addrId;
+    }
+  }
 }
 
 // 선택된 고객사의 주소가 2개 이상이면 "어느 주소 건인지" 선택하게 한다.

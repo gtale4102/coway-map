@@ -864,7 +864,7 @@
   <div class="sheet-handle"></div>
   <div class="sheet-header">
     <div class="sheet-title" id="detail-title">고객사 정보</div>
-    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
+    <button class="sheet-close" onclick="closeDetailSheet()">✕</button>
   </div>
   <div class="sheet-body" id="detail-body"></div>
 </div>
@@ -982,7 +982,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v3.01</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v3.03</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1275,6 +1275,7 @@ let selectedLogType = null;
 let currentColorTarget = null;
 let map = null;
 let clusterer = null;
+let GHOST_MARKER_IMAGE = null; // 병합 핀의 업체 수 보정용 투명 마커 이미지 - initMap()에서 생성
 // 줌 레벨이 이 값 이상(더 축소된 상태)이면 클러스터링 적용 - 숫자가 클수록 더 축소된 상태
 const CLUSTER_MIN_LEVEL = 9;
 
@@ -1609,6 +1610,12 @@ function initMap() {
     };
     map = new kakao.maps.Map(container, options);
 
+    // 1x1 완전 투명 이미지 - 병합 핀의 업체 수 보정용 "유령 마커"에 사용
+    GHOST_MARKER_IMAGE = new kakao.maps.MarkerImage(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+      new kakao.maps.Size(1, 1)
+    );
+
     // 마커 클러스터러 - 많이 축소된 화면에서 밀집된 핀을 숫자 버블로 묶어줌
     // 확대(레벨이 낮아짐)하면 자동으로 풀리고 개별 핀이 다시 표시됨
     // 라이브러리 로드 실패 등으로 여기서 오류가 나도 지도 자체는 정상 동작해야 하므로 별도 처리
@@ -1618,6 +1625,7 @@ function initMap() {
         averageCenter: true,
         minLevel: CLUSTER_MIN_LEVEL,
         disableClickZoom: false,
+        gridSize: 38, // 격자를 잘게(기본값보다 작게) 쪼개서 더 세밀한 단위로 묶이게 함
         calculator: [10, 30],
         styles: [
           { width: '36px', height: '36px', background: 'rgba(79,124,255,0.92)', borderRadius: '18px',
@@ -2130,22 +2138,53 @@ function renderAllMarkers() {
 
       if (clusterer) {
         clusterMarkers.push(marker);
+        // 병합된 핀(같은 주소에 여러 업체)은 화면에는 아이콘 1개만 보이지만
+        // 실제로는 N개 업체를 대표하는 거라, 클러스터 버블 숫자가 "핀 개수"가 아니라
+        // "업체 개수"를 보여주도록 안 보이는 투명 마커를 (업체수-1)개 같은 위치에 추가한다.
+        // 카카오 클러스터러는 버블 안의 마커 개수만 셀 뿐 마커별 의미를 구분하지 않기 때문에,
+        // 이렇게 하면 표준 클릭/확대 동작은 전혀 건드리지 않으면서 정확한 업체 수가 표시된다.
+        if (isMerged && item.members.length > 1 && GHOST_MARKER_IMAGE) {
+          for (let g = 1; g < item.members.length; g++) {
+            const ghost = new kakao.maps.Marker({
+              position: pinLatLng,
+              image: GHOST_MARKER_IMAGE
+            });
+            clusterMarkers.push(ghost);
+          }
+        }
       } else {
         marker.setMap(map);
       }
 
       // 많이 축소되어 클러스터링 중일 땐 라벨/배지를 생략해 혼잡을 줄임
       if (!isClusterZoom) {
-        // 고객사명 라벨 (병합된 핀은 여러 줄로 표시)
-        const labelHtml = (Array.isArray(labelText) ? labelText : [labelText])
-          .map(line => `<div style="white-space:nowrap;">${line}</div>`).join('');
+        // 고객사명 라벨 (병합된 핀은 여러 줄로 표시) - 핀과 마찬가지로 클릭하면
+        // 상세정보(또는 병합인 경우 선택 팝업)가 열리도록 DOM 엘리먼트로 만들어
+        // 클릭 이벤트를 직접 붙인다 (문자열 onclick은 고객사명에 따옴표 등 특수문자가
+        // 있으면 깨질 수 있어서 피함).
+        function makeLabelEl(borderColor) {
+          const el = document.createElement('div');
+          el.style.cssText = `background:rgba(15,17,23,${borderColor ? '0.92' : '0.85'});color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;cursor:pointer;` +
+            (borderColor ? `border:2px solid ${borderColor};` : '');
+          (Array.isArray(labelText) ? labelText : [labelText]).forEach(line => {
+            const lineEl = document.createElement('div');
+            lineEl.style.whiteSpace = 'nowrap';
+            lineEl.textContent = line;
+            el.appendChild(lineEl);
+          });
+          el.addEventListener('click', (e) => { e.stopPropagation(); clickHandler(); });
+          return el;
+        }
         if (showLabels && proj) {
           let label;
           if (!moved) {
             // 안 겹치는 일반적인 경우 - 기존과 동일한 모양 유지
+            const el = makeLabelEl(null);
+            el.style.marginTop = '4px';
+            el.style.transform = 'translateY(4px)';
             label = new kakao.maps.CustomOverlay({
               position: pinLatLng,
-              content: `<div style="background:rgba(15,17,23,0.85);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;margin-top:4px;transform:translateY(4px);">${labelHtml}</div>`,
+              content: el,
               yAnchor: 0,
               zIndex: 10
             });
@@ -2153,7 +2192,7 @@ function renderAllMarkers() {
             // 겹쳐서 옮긴 경우 - 핀 테두리와 같은 식별색으로 라벨 테두리 + 연결선 표시
             label = new kakao.maps.CustomOverlay({
               position: labelLatLng,
-              content: `<div style="background:rgba(15,17,23,0.92);color:#fff;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;border:2px solid ${linkColor};">${labelHtml}</div>`,
+              content: makeLabelEl(linkColor),
               yAnchor: 0.5,
               xAnchor: 0.5,
               zIndex: 12
@@ -2627,13 +2666,7 @@ async function deleteCustomer(id) {
     if (trash.length > 200) trash = trash.slice(0, 200);
   }
 
-  if (detailSheetOrigin === 'list') {
-    closeSheet('detail-sheet');
-    openSheet('list-sheet');
-  } else {
-    closeAllSheets();
-  }
-  detailSheetOrigin = null;
+  closeDetailSheet();
 
   renderAllMarkers();
   await saveData();
@@ -3284,6 +3317,18 @@ function closeSheet(id) {
   document.getElementById(id).classList.remove('open');
   const anyOpen = document.querySelectorAll('.bottom-sheet.open').length > 0;
   if (!anyOpen) document.getElementById('overlay').classList.remove('open');
+}
+
+// 상세화면을 닫을 때, 목록에서 들어온 경우(origin='list')라면 지도가 아니라
+// 목록 화면으로 돌아가게 한다 - 여러 고객사를 이어서 훑어볼 수 있도록
+function closeDetailSheet() {
+  if (detailSheetOrigin === 'list') {
+    closeSheet('detail-sheet');
+    openSheet('list-sheet');
+  } else {
+    closeAllSheets();
+  }
+  detailSheetOrigin = null;
 }
 
 function closeAllSheets() {

@@ -914,6 +914,7 @@
   <div id="list-select-toolbar" style="display:none; align-items:center; gap:8px; padding:8px 16px; border-bottom:1px solid var(--border);">
     <span id="list-select-count" style="font-size:13px; font-weight:600; flex:1;">0개 선택됨</span>
     <button class="action-btn secondary" style="padding:6px 12px; font-size:12px;" onclick="exitListSelectMode()">취소</button>
+    <button class="action-btn secondary" id="list-merge-btn" style="display:none; padding:6px 12px; font-size:12px;" onclick="openMergeConfirm()">🔗 병합</button>
     <button class="action-btn danger" style="padding:6px 12px; font-size:12px;" onclick="bulkDeleteSelected()">삭제</button>
   </div>
   <div style="padding:6px 16px 0; font-size:11px; color:var(--text2);" id="list-longpress-hint">고객사를 길게 누르면 여러 개를 선택할 수 있어요</div>
@@ -943,6 +944,10 @@
       </div>
       <input type="hidden" id="daily-customer">
       <div id="daily-selected" style="margin-top:6px; font-size:13px; color:var(--accent); display:none;"></div>
+    </div>
+    <div class="form-group" id="daily-address-group" style="display:none;">
+      <label class="form-label">어느 주소 건인가요?</label>
+      <select class="form-select" id="daily-address-select"></select>
     </div>
     <div class="form-group">
       <label class="form-label">컨택 유형</label>
@@ -982,7 +987,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v3.03</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v4.00</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1268,6 +1273,7 @@ let isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 let currentUser = '';
 let editingCustomerId = null;
 let detailSheetOrigin = null; // 'list' | null - 상세화면 진입 경로 추적 (삭제 후 복귀 위치 결정)
+let detailSelectedAddrId = null; // 상세화면에서 현재 선택된 주소 (null = 전체보기)
 let listSelectMode = false;
 let selectedListIds = new Set();
 let mapSearchQuery = '';
@@ -1278,6 +1284,20 @@ let clusterer = null;
 let GHOST_MARKER_IMAGE = null; // 병합 핀의 업체 수 보정용 투명 마커 이미지 - initMap()에서 생성
 // 줌 레벨이 이 값 이상(더 축소된 상태)이면 클러스터링 적용 - 숫자가 클수록 더 축소된 상태
 const CLUSTER_MIN_LEVEL = 9;
+
+// 주소별 독립 컨택이력/연락처를 지원하기 위해, 모든 주소에 안정적인 고유 id를 부여한다.
+// 이미 id가 있으면 건드리지 않고, 없는(과거 데이터) 경우에만 새로 부여한다.
+// 로그/연락처의 addressId가 비어있으면(과거 데이터 포함) "공용"으로 취급하므로
+// 별도의 데이터 이전(migration) 로직 없이 이 함수 하나로 호환된다.
+function ensureAddressIds() {
+  let changed = false;
+  customers.forEach(c => {
+    (c.addresses || []).forEach(a => {
+      if (!a.id) { a.id = 'addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); changed = true; }
+    });
+  });
+  return changed;
+}
 
 async function loadData() {
   return new Promise((resolve) => {
@@ -1292,6 +1312,7 @@ async function loadData() {
       ensureUncategorized();
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       trash = JSON.parse(localStorage.getItem(TRASH_KEY) || '[]');
+      ensureAddressIds();
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
     }, 8000);
@@ -1305,6 +1326,7 @@ async function loadData() {
       ensureUncategorized();
       routeHistory = data.routeHistory || [];
       trash = data.trash || [];
+      ensureAddressIds();
       // 로컬 백업
       localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
       localStorage.setItem(CAT_KEY, JSON.stringify(categories));
@@ -1322,6 +1344,7 @@ async function loadData() {
       ensureUncategorized();
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       trash = JSON.parse(localStorage.getItem(TRASH_KEY) || '[]');
+      ensureAddressIds();
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
     };
@@ -1956,7 +1979,7 @@ function renderAllMarkers() {
         addrsWithCoords.push({ lat: c.lat, lng: c.lng, label: '' });
       }
       addrsWithCoords.forEach((addr, idx) => {
-        rawItems.push({ c, idx, addr: { lat: addr.lat, lng: addr.lng, label: addr.label } });
+        rawItems.push({ c, idx, addr: { id: addr.id || null, lat: addr.lat, lng: addr.lng, label: addr.label } });
       });
     } catch (err) {
       console.error('marker collect error for', c.name, err);
@@ -2092,7 +2115,7 @@ function renderAllMarkers() {
         : item.c.name + (addr.label ? ' (' + addr.label + ')' : '');
       const clickHandler = isMerged
         ? () => openMergedChooser(item.members)
-        : () => openDetail(item.c.id);
+        : () => openDetail(item.c.id, null, addr.id || null);
       const titleText = isMerged
         ? item.members.map(m => m.c.name).join(', ')
         : item.c.name + (addr.label ? ' (' + addr.label + ')' : '');
@@ -2297,7 +2320,7 @@ function openMergedChooser(members) {
   list.innerHTML = members.map(m => {
     const color = getCategoryColor(m.c.category);
     const addrLabel = m.addr.label ? ` (${m.addr.label})` : '';
-    return `<div class="contact-row" style="cursor:pointer;" onclick="closeMergedChooser(); openDetail('${m.c.id}')">
+    return `<div class="contact-row" style="cursor:pointer;" onclick="closeMergedChooser(); openDetail('${m.c.id}', null, ${m.addr.id ? `'${m.addr.id}'` : 'null'})">
       <div style="width:10px; height:10px; border-radius:50%; background:${color}; flex-shrink:0; margin-right:10px;"></div>
       <div style="font-weight:600; font-size:14px;">${m.c.name}${addrLabel}</div>
     </div>`;
@@ -2309,24 +2332,95 @@ function closeMergedChooser(e) {
   document.getElementById('merged-pin-overlay').style.display = 'none';
 }
 
-function openDetail(id, origin) {
+// 로그/연락처가 특정 주소 필터에 해당하는지 판정.
+// - filterAddrId가 없으면(전체보기) 항상 포함
+// - addressId가 없는(공용) 항목은 항상 포함
+// - addressId가 지금은 존재하지 않는 주소를 가리키면(주소가 나중에 삭제된 경우)
+//   데이터 유실 없이 "공용"으로 취급해 항상 보여준다
+function belongsToAddrFilter(item, c, filterAddrId) {
+  if (!filterAddrId) return true;
+  if (!item.addressId) return true;
+  if (item.addressId === filterAddrId) return true;
+  if (!(c.addresses || []).some(a => a.id === item.addressId)) return true;
+  return false;
+}
+
+function selectDetailAddress(addrId) {
+  detailSelectedAddrId = (detailSelectedAddrId === addrId) ? null : addrId; // 다시 누르면 전체보기로 토글
+  openDetail(editingCustomerId, detailSheetOrigin, detailSelectedAddrId, true);
+}
+
+async function splitAddress(custId, addrId) {
+  const c = customers.find(x => x.id === custId);
+  if (!c) return;
+  const addr = (c.addresses || []).find(a => a.id === addrId);
+  if (!addr) return;
+  if ((c.addresses || []).length <= 1) {
+    showToast('주소가 1개뿐이라 분리할 수 없습니다');
+    return;
+  }
+  const addrLabel = addr.label || addr.address;
+  if (!confirm(`"${addrLabel}"을(를) 별도 고객사로 분리할까요?\n이 주소 전용 컨택이력/담당자는 그대로 따라갑니다.`)) return;
+
+  const ownLogs = (c.logs || []).filter(l => l.addressId === addrId);
+  const sharedLogs = (c.logs || []).filter(l => l.addressId !== addrId);
+  const ownContacts = (c.contacts || []).filter(ct => ct.addressId === addrId);
+  const sharedContacts = (c.contacts || []).filter(ct => ct.addressId !== addrId);
+
+  const newCustomer = {
+    id: 'cst_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+    name: c.name,
+    category: c.category,
+    memo: '',
+    contacts: ownContacts,
+    addresses: [addr],
+    lat: addr.lat, lng: addr.lng,
+    owner: c.owner,
+    logs: ownLogs,
+    createdAt: new Date().toISOString()
+  };
+
+  c.addresses = (c.addresses || []).filter(a => a.id !== addrId);
+  c.logs = sharedLogs;
+  c.contacts = sharedContacts;
+  const firstAddr = c.addresses.find(a => a.lat);
+  c.lat = firstAddr ? firstAddr.lat : null;
+  c.lng = firstAddr ? firstAddr.lng : null;
+
+  customers.push(newCustomer);
+  detailSelectedAddrId = null;
+  renderAllMarkers();
+  await saveData();
+  showToast('별도 고객사로 분리되었습니다');
+  openDetail(custId, detailSheetOrigin);
+}
+
+function openDetail(id, origin, addressId, keepSelection) {
   const c = customers.find(x => x.id === id);
   if (!c) return;
   editingCustomerId = id;
   detailSheetOrigin = origin || null;
+  if (!keepSelection) detailSelectedAddrId = addressId || null;
+  const filterAddrId = detailSelectedAddrId;
 
   const color = getCategoryColor(c.category);
   const catName = getCategoryName(c.category);
+  const hasMultipleAddrs = (c.addresses || []).length > 1;
+
+  // 필터 적용 - 주소가 1개뿐이면 필터링 의미가 없으므로 항상 전체를 보여준다
+  const allLogs = c.logs || [];
+  const logs = hasMultipleAddrs ? allLogs.filter(l => belongsToAddrFilter(l, c, filterAddrId)) : allLogs;
+  const allContacts = c.contacts || [];
+  const contacts = hasMultipleAddrs ? allContacts.filter(ct => belongsToAddrFilter(ct, c, filterAddrId)) : allContacts;
 
   // last contacts
-  const logs = c.logs || [];
   const lastVisit = logs.filter(l => l.type === 'visit').sort((a,b) => b.date.localeCompare(a.date))[0];
   const lastCall = logs.filter(l => l.type === 'call').sort((a,b) => b.date.localeCompare(a.date))[0];
   const lastSms = logs.filter(l => l.type === 'sms').sort((a,b) => b.date.localeCompare(a.date))[0];
 
   // contacts html
   let contactsHtml = '';
-  (c.contacts || []).forEach(ct => {
+  contacts.forEach(ct => {
     const tel = ct.phone ? ct.phone.replace(/-/g,'') : '';
     contactsHtml += `
       <div class="contact-row">
@@ -2338,16 +2432,24 @@ function openDetail(id, origin) {
       </div>`;
   });
 
-  // addresses html
+  // addresses html - 2개 이상이면 선택(필터)/분리 가능한 탭으로, 아니면 기존처럼 단순 표시
   let addrHtml = '';
+  if (hasMultipleAddrs) {
+    addrHtml += `<div style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;">
+      <div onclick="selectDetailAddress(null)" style="padding:5px 10px; border-radius:999px; font-size:12px; font-weight:600; cursor:pointer; border:1px solid ${!filterAddrId ? 'var(--accent)' : 'var(--border)'}; background:${!filterAddrId ? 'var(--accent)' : 'transparent'}; color:${!filterAddrId ? '#fff' : 'var(--text2)'};">전체보기</div>
+    </div>`;
+  }
   (c.addresses || []).forEach(a => {
-    const q = encodeURIComponent(a.address);
-    addrHtml += `<div class="contact-row">
+    const isSelected = hasMultipleAddrs && filterAddrId === a.id;
+    addrHtml += `<div class="contact-row" style="cursor:${hasMultipleAddrs ? 'pointer' : 'default'}; ${isSelected ? `border:1px solid ${color};` : ''}" ${hasMultipleAddrs ? `onclick="selectDetailAddress('${a.id}')"` : ''}>
       <div>
-        ${a.label ? `<div style="font-size:11px;color:var(--text2);margin-bottom:2px;">${a.label}</div>` : ''}
+        ${a.label ? `<div style="font-size:11px;color:var(--text2);margin-bottom:2px;">${a.label}${isSelected ? ' · 선택됨' : ''}</div>` : ''}
         <div class="info-value">${a.address}${a.detail ? ' <span style="color:var(--text2);">' + a.detail + '</span>' : ''}</div>
       </div>
-      <button class="contact-call-btn" style="color:var(--warning);" onclick="openKakaoNavi('${a.address}')">🗺️ 길찾기</button>
+      <div style="display:flex; gap:4px; flex-shrink:0;">
+        ${hasMultipleAddrs ? `<button class="contact-call-btn" style="color:var(--danger);" onclick="event.stopPropagation(); splitAddress('${id}','${a.id}')">✂️ 분리</button>` : ''}
+        <button class="contact-call-btn" style="color:var(--warning);" onclick="event.stopPropagation(); openKakaoNavi('${a.address}')">🗺️ 길찾기</button>
+      </div>
     </div>`;
   });
 
@@ -2367,6 +2469,7 @@ function openDetail(id, origin) {
     <div class="customer-badge" style="border-color:${color};color:${color};">
       <span class="legend-dot" style="background:${color}"></span>${catName}
     </div>
+    ${hasMultipleAddrs ? `<div style="font-size:11px; color:var(--text2); margin-top:6px;">📍 주소가 여러 곳입니다. 아래에서 주소를 선택하면 그 주소만의 이력/담당자만 볼 수 있어요.</div>` : ''}
 
     <div class="contact-stat-grid">
       <div class="contact-stat">
@@ -2385,17 +2488,17 @@ function openDetail(id, origin) {
 
     ${c.memo ? `<div class="info-section"><div class="info-label">메모</div><div class="info-value">${c.memo}</div></div>` : ''}
 
-    ${contactsHtml ? `<div class="info-section"><div class="info-label">담당자</div>${contactsHtml}</div>` : ''}
+    ${(c.addresses || []).length > 0 ? `<div class="info-section"><div class="info-label">주소 / 지점</div>${addrHtml}</div>` : ''}
 
-    ${addrHtml ? `<div class="info-section"><div class="info-label">주소 / 지점</div>${addrHtml}</div>` : ''}
+    ${contactsHtml ? `<div class="info-section"><div class="info-label">담당자${hasMultipleAddrs && filterAddrId ? ' (이 주소 + 공용)' : ''}</div>${contactsHtml}</div>` : ''}
 
     <div class="info-section">
-      <div class="info-label">컨택 이력</div>
+      <div class="info-label">컨택 이력${hasMultipleAddrs && filterAddrId ? ' (이 주소 + 공용)' : ''}</div>
       ${logsHtml}
     </div>
 
     <div class="action-row">
-      <button class="action-btn primary" onclick="openQuickLog('${id}')">✏️ 컨택 기록</button>
+      <button class="action-btn primary" onclick="openQuickLog('${id}', ${filterAddrId ? `'${filterAddrId}'` : 'null'})">✏️ 컨택 기록</button>
       <button class="action-btn secondary" onclick="openEditSheet('${id}')">수정</button>
       <button class="action-btn map-btn" onclick="moveToMarker('${id}')">📍 지도에서 보기</button>
       <button class="action-btn map-btn" onclick="openRoadview('${id}')">🔭 로드뷰</button>
@@ -2458,12 +2561,12 @@ function moveToMarker(id) {
 }
 
 // ==================== QUICK LOG ====================
-function openQuickLog(id) {
+function openQuickLog(id, addressId) {
   const c = customers.find(x => x.id === id);
   if (!c) return;
   closeAllSheets();
   setTimeout(() => {
-    openSheet('daily-sheet', id, c.name);
+    openSheet('daily-sheet', id, c.name, addressId || null);
   }, 200);
 }
 
@@ -2514,28 +2617,61 @@ function populateCategorySelect(selected) {
 function addContactRow(ct = {}) {
   const row = document.createElement('div');
   row.className = 'multi-entry-row';
+  row.dataset.contactAddrId = ct.addressId || ''; // 빈 값 = 전체 공용
   row.innerHTML = `
     <input type="text" class="form-input ct-name" placeholder="이름" value="${ct.name || ''}">
     <input type="tel" class="form-input ct-phone" placeholder="연락처" value="${ct.phone || ''}">
-    <button class="remove-btn" onclick="this.parentElement.remove()">−</button>`;
+    <button class="remove-btn" onclick="this.parentElement.remove()">−</button>
+    <select class="form-select ct-addr-select" style="width:100%; margin-top:4px; font-size:12px;" onchange="this.parentElement.dataset.contactAddrId=this.value;"></select>`;
   document.getElementById('f-contacts').appendChild(row);
+  refreshContactAddressOptions();
+}
+
+// 연락처별 "담당 주소" 드롭다운 목록을, 현재 폼에 있는 주소들 기준으로 다시 채운다.
+// 주소를 추가/삭제할 때마다 호출해서 항상 최신 주소 목록을 보여주되,
+// 각 연락처가 이미 선택해둔 값(data-contact-addr-id)은 그대로 유지한다.
+function refreshContactAddressOptions() {
+  const addrWraps = [...document.querySelectorAll('#f-addresses .addr-wrap')];
+  document.querySelectorAll('#f-contacts .multi-entry-row').forEach(row => {
+    const sel = row.querySelector('.ct-addr-select');
+    if (!sel) return;
+    const current = row.dataset.contactAddrId || '';
+    let optionsHtml = `<option value="">전체 공용 담당</option>`;
+    addrWraps.forEach(w => {
+      const id = w.dataset.addrId;
+      const label = w.querySelector('.addr-label')?.value.trim();
+      const addr = w.querySelector('.addr-addr')?.value.trim();
+      const text = label || addr || '주소';
+      optionsHtml += `<option value="${id}" ${id === current ? 'selected' : ''}>${text} 담당</option>`;
+    });
+    sel.innerHTML = optionsHtml;
+    // 선택했던 주소가 삭제되어 더 이상 목록에 없으면 자동으로 "전체 공용"으로 되돌림
+    if (current && !addrWraps.some(w => w.dataset.addrId === current)) {
+      row.dataset.contactAddrId = '';
+      sel.value = '';
+    }
+  });
 }
 
 function addAddressRow(a = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'addr-wrap';
   wrap.style.marginBottom = '8px';
+  // 폼에 추가되는 즉시 id를 부여한다 (기존 주소면 그대로 유지) - 그래야 같은 화면 안에서
+  // 담당자 연락처가 "이 주소 담당"으로 바로 연결될 수 있다.
+  wrap.dataset.addrId = a.id || ('addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7));
   wrap.innerHTML = `
     <div class="address-row">
       <input type="text" class="form-input addr-label" placeholder="구분(본사/지점)" value="${a.label || ''}" style="max-width:90px;">
       <input type="text" class="form-input addr-addr" placeholder="주소 검색을 눌러주세요" value="${a.address || ''}" readonly style="cursor:pointer;" onclick="openAddressSearch(this)">
-      <button class="remove-btn" onclick="this.closest('.addr-wrap').remove()">−</button>
+      <button class="remove-btn" onclick="this.closest('.addr-wrap').remove(); refreshContactAddressOptions();">−</button>
     </div>
     <div style="display:flex; gap:6px; margin-top:4px;">
       <button class="add-entry-btn" style="flex:1; margin-top:0; padding:6px;" onclick="openAddressSearch(this.closest('.addr-wrap').querySelector('.addr-addr'))">🔍 주소 검색</button>
       <input type="text" class="form-input addr-detail" placeholder="상세주소(동/호수 등)" value="${a.detail || ''}" style="flex:1.5;">
     </div>`;
   document.getElementById('f-addresses').appendChild(wrap);
+  refreshContactAddressOptions();
 }
 
 let addressSearchTarget = null;
@@ -2599,7 +2735,8 @@ async function submitForm() {
     document.querySelectorAll('#f-contacts .multi-entry-row').forEach(row => {
       const n = row.querySelector('.ct-name').value.trim();
       const p = row.querySelector('.ct-phone').value.trim();
-      if (n || p) contacts.push({ name: n, phone: p });
+      const addressId = row.dataset.contactAddrId || null; // 빈 값/없음 = 전체 공용 담당
+      if (n || p) contacts.push({ name: n, phone: p, addressId });
     });
 
     const addresses = [];
@@ -2607,7 +2744,8 @@ async function submitForm() {
       const l = wrap.querySelector('.addr-label').value.trim();
       const a = wrap.querySelector('.addr-addr').value.trim();
       const d = wrap.querySelector('.addr-detail')?.value.trim() || '';
-      if (a) addresses.push({ label: l, address: a, detail: d });
+      const id = wrap.dataset.addrId; // addAddressRow에서 이미 발급됨 (신규/기존 모두)
+      if (a) addresses.push({ id, label: l, address: a, detail: d });
     });
 
     // 모든 주소 좌표 변환 (실패해도 저장은 계속 진행)
@@ -2690,7 +2828,7 @@ function updateDateWeekdayLabel() {
   label.textContent = `${v} (${WEEKDAY_KR[dt.getDay()]})`;
 }
 
-function setupDailySheet(prefillId, prefillName) {
+function setupDailySheet(prefillId, prefillName, prefillAddrId) {
   const dateInput = document.getElementById('daily-date-input');
   if (!dateInput.value) {
     dateInput.value = new Date().toISOString().slice(0,10);
@@ -2703,10 +2841,19 @@ function setupDailySheet(prefillId, prefillName) {
     const sel = document.getElementById('daily-selected');
     sel.textContent = '✓ ' + prefillName + ' 선택됨';
     sel.style.display = 'block';
+    populateDailyAddressSelect(prefillId);
+    // 특정 핀(주소)에서 들어온 경우 그 주소를 미리 선택해둔다
+    if (prefillAddrId) {
+      const addrSel = document.getElementById('daily-address-select');
+      if (addrSel && [...addrSel.options].some(o => o.value === prefillAddrId)) {
+        addrSel.value = prefillAddrId;
+      }
+    }
   } else {
     document.getElementById('daily-search').value = '';
     document.getElementById('daily-customer').value = '';
     document.getElementById('daily-selected').style.display = 'none';
+    document.getElementById('daily-address-group').style.display = 'none';
   }
   document.getElementById('daily-search-results').style.display = 'none';
   // 컨택 유형 선택 초기화
@@ -2740,7 +2887,11 @@ async function submitDailyLog() {
 
   const backupLogs = JSON.parse(JSON.stringify(customers[idx].logs || []));
   if (!customers[idx].logs) customers[idx].logs = [];
-  customers[idx].logs.push({ type: selectedLogType, date, memo });
+  const addrGroup = document.getElementById('daily-address-group');
+  const addressId = (addrGroup && addrGroup.style.display !== 'none')
+    ? (document.getElementById('daily-address-select').value || null)
+    : null; // 주소가 1개뿐이면 굳이 물을 필요 없이 공용으로 기록
+  customers[idx].logs.push({ type: selectedLogType, date, memo, addressId });
 
   await saveData();
 
@@ -2982,6 +3133,76 @@ function toggleListSelect(id) {
 function updateListSelectToolbar() {
   const el = document.getElementById('list-select-count');
   if (el) el.textContent = selectedListIds.size + '개 선택됨';
+  const mergeBtn = document.getElementById('list-merge-btn');
+  if (mergeBtn) mergeBtn.style.display = (selectedListIds.size === 2) ? 'inline-flex' : 'none';
+}
+
+// ==================== 고객사 병합 ====================
+function openMergeConfirm() {
+  if (selectedListIds.size !== 2) return;
+  const [idA, idB] = [...selectedListIds];
+  const a = customers.find(c => c.id === idA);
+  const b = customers.find(c => c.id === idB);
+  if (!a || !b) return;
+
+  const sameCategory = a.category === b.category;
+  const catChoiceHtml = sameCategory ? '' : `
+    <div style="margin-top:12px;">
+      <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">두 고객사의 분류가 달라요. 합친 뒤 분류를 선택하세요.</div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="radio" name="merge-cat-choice" value="${a.category}" checked>
+          <span class="legend-dot" style="background:${getCategoryColor(a.category)}; width:10px; height:10px; border-radius:50%; display:inline-block;"></span>
+          ${a.name} 기준 (${getCategoryName(a.category)})
+        </label>
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+          <input type="radio" name="merge-cat-choice" value="${b.category}">
+          <span class="legend-dot" style="background:${getCategoryColor(b.category)}; width:10px; height:10px; border-radius:50%; display:inline-block;"></span>
+          ${b.name} 기준 (${getCategoryName(b.category)})
+        </label>
+      </div>
+    </div>`;
+
+  const overlay = document.getElementById('merged-pin-overlay');
+  const list = document.getElementById('merged-pin-list');
+  list.innerHTML = `
+    <div style="font-size:14px; font-weight:700; margin-bottom:4px;">두 고객사를 합칠까요?</div>
+    <div style="font-size:13px; color:var(--text2); margin-bottom:10px;">"${a.name}"과(와) "${b.name}"의 주소·담당자·이력이 "${a.name}" 하나로 합쳐집니다. 이 작업은 되돌릴 수 없어요.</div>
+    ${catChoiceHtml}
+    <div style="display:flex; gap:8px; margin-top:16px;">
+      <button class="action-btn secondary" style="flex:1;" onclick="closeMergedChooser()">취소</button>
+      <button class="action-btn primary" style="flex:1;" onclick="confirmMergeCustomers('${idA}','${idB}')">합치기</button>
+    </div>`;
+  overlay.style.display = 'flex';
+}
+
+async function confirmMergeCustomers(idA, idB) {
+  const a = customers.find(c => c.id === idA);
+  const b = customers.find(c => c.id === idB);
+  if (!a || !b) { closeMergedChooser(); return; }
+
+  const radios = document.querySelectorAll('input[name="merge-cat-choice"]');
+  let finalCategory = a.category;
+  radios.forEach(r => { if (r.checked) finalCategory = r.value; });
+
+  a.addresses = [...(a.addresses || []), ...(b.addresses || [])];
+  a.contacts = [...(a.contacts || []), ...(b.contacts || [])];
+  a.logs = [...(a.logs || []), ...(b.logs || [])];
+  a.category = finalCategory;
+  if (!a.memo && b.memo) a.memo = b.memo;
+  else if (a.memo && b.memo && a.memo !== b.memo) a.memo = a.memo + ' / ' + b.memo;
+  const firstAddr = a.addresses.find(x => x.lat);
+  a.lat = firstAddr ? firstAddr.lat : a.lat;
+  a.lng = firstAddr ? firstAddr.lng : a.lng;
+
+  customers = customers.filter(c => c.id !== idB);
+
+  closeMergedChooser();
+  exitListSelectMode();
+  renderAllMarkers();
+  await saveData();
+  showToast('병합되었습니다');
+  openSheet('list-sheet');
 }
 
 async function bulkDeleteSelected() {
@@ -3287,7 +3508,7 @@ document.addEventListener('click', () => {
 });
 
 // ==================== SHEETS ====================
-function openSheet(id, arg1, arg2) {
+function openSheet(id, arg1, arg2, arg3) {
   document.getElementById('overlay').classList.add('open');
   document.getElementById(id).classList.add('open');
   if (id === 'list-sheet') {
@@ -3299,7 +3520,7 @@ function openSheet(id, arg1, arg2) {
     if (hint) hint.style.display = 'block';
     renderListBody();
   }
-  if (id === 'daily-sheet') setupDailySheet(arg1, arg2);
+  if (id === 'daily-sheet') setupDailySheet(arg1, arg2, arg3);
   if (id === 'category-sheet') renderCategoryManager();
   if (id === 'history-sheet') renderHistoryBody();
   if (id === 'remind-sheet') renderRemindList();
@@ -3329,6 +3550,7 @@ function closeDetailSheet() {
     closeAllSheets();
   }
   detailSheetOrigin = null;
+  detailSelectedAddrId = null;
 }
 
 function closeAllSheets() {
@@ -3535,61 +3757,61 @@ async function processExcelImport(rows) {
 
     const memo = getCol(first, ['메모', '비고']);
 
-    // 담당자 (행마다 다를 수 있어 중복 제거)
-    const contactsMap = {};
-    groupRows.forEach(r => {
-      const cName = getCol(r, ['담당자명', '담당자']);
-      const cPhone = getCol(r, ['연락처', '전화번호']);
-      if (cName || cPhone) {
-        const key = cName + '|' + cPhone;
-        contactsMap[key] = { name: cName, phone: cPhone };
-      }
-    });
-    const contacts = Object.values(contactsMap);
-
-    // 주소들 - 행마다 1개, 지오코딩 수행
+    // 주소 + 컨택이력 + 담당자 - 한 행 안에서 같이 처리한다.
+    // 같은 행에 주소가 있으면, 그 행의 컨택이력/담당자는 그 주소 전용으로 연결한다.
+    // 주소가 비어있는 행의 컨택이력/담당자는 고객사 전체 공용(addressId 없음)으로 처리한다.
+    const TYPE_MAP = { '방문': 'visit', '전화': 'call', '메시지': 'sms', '문자': 'sms' };
     const addresses = [];
+    const logs = [];
+    const contactsMap = {}; // 같은 이름+전화는 중복 제거
     for (const r of groupRows) {
       const addrLabel = getCol(r, ['주소구분', '구분']);
       const addrText = getCol(r, ['주소']);
       const addrDetail = getCol(r, ['상세주소', '상세']);
-      if (!addrText) continue;
 
-      let lat = null, lng = null;
-      try {
-        const geo = await geocodeAddress(addrText);
-        if (geo) { lat = geo.lat; lng = geo.lng; }
-        else geocodeFailed.push({ name, address: addrText });
-      } catch {
-        geocodeFailed.push({ name, address: addrText });
+      let addrId = null;
+      if (addrText) {
+        let lat = null, lng = null;
+        try {
+          const geo = await geocodeAddress(addrText);
+          if (geo) { lat = geo.lat; lng = geo.lng; }
+          else geocodeFailed.push({ name, address: addrText });
+        } catch {
+          geocodeFailed.push({ name, address: addrText });
+        }
+        addrId = 'addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+        addresses.push({ id: addrId, label: addrLabel, address: addrText, detail: addrDetail, lat, lng });
       }
-      addresses.push({ label: addrLabel, address: addrText, detail: addrDetail, lat, lng });
+
+      const cName = getCol(r, ['담당자명', '담당자']);
+      const cPhone = getCol(r, ['연락처', '전화번호']);
+      if (cName || cPhone) {
+        const key = cName + '|' + cPhone + '|' + (addrId || '공용');
+        contactsMap[key] = { name: cName, phone: cPhone, addressId: addrId };
+      }
+
+      const logDateRaw = getCol(r, ['컨택날짜']);
+      if (logDateRaw) {
+        let logDate = logDateRaw;
+        // 엑셀 날짜가 Date객체/일련번호로 들어오는 경우 YYYY-MM-DD로 변환
+        if (r['컨택날짜'] instanceof Date) {
+          logDate = r['컨택날짜'].toISOString().slice(0, 10);
+        } else if (/^\d{4}-\d{2}-\d{2}/.test(logDateRaw)) {
+          logDate = logDateRaw.slice(0, 10);
+        }
+        const typeRaw = getCol(r, ['컨택유형']);
+        const logType = TYPE_MAP[typeRaw];
+        const logMemo = getCol(r, ['컨택메모']);
+        if (!logType) {
+          typeSkipped.push({ name, date: logDate, memo: logMemo });
+        } else {
+          logs.push({ type: logType, date: logDate, memo: logMemo, addressId: addrId });
+        }
+      }
     }
 
     const firstAddr = addresses.find(a => a.lat);
-
-    // 컨택이력 - 행마다 0~1개, 주소와 같은 행이든 별도 행이든 독립적으로 처리
-    const TYPE_MAP = { '방문': 'visit', '전화': 'call', '메시지': 'sms', '문자': 'sms' };
-    const logs = [];
-    for (const r of groupRows) {
-      const logDateRaw = getCol(r, ['컨택날짜']);
-      if (!logDateRaw) continue;
-      let logDate = logDateRaw;
-      // 엑셀 날짜가 Date객체/일련번호로 들어오는 경우 YYYY-MM-DD로 변환
-      if (r['컨택날짜'] instanceof Date) {
-        logDate = r['컨택날짜'].toISOString().slice(0, 10);
-      } else if (/^\d{4}-\d{2}-\d{2}/.test(logDateRaw)) {
-        logDate = logDateRaw.slice(0, 10);
-      }
-      const typeRaw = getCol(r, ['컨택유형']);
-      const logType = TYPE_MAP[typeRaw];
-      const logMemo = getCol(r, ['컨택메모']);
-      if (!logType) {
-        typeSkipped.push({ name, date: logDate, memo: logMemo });
-        continue; // 유형 불명확 - 임의 추측 등록하지 않고 건너뜀
-      }
-      logs.push({ type: logType, date: logDate, memo: logMemo });
-    }
+    const contacts = Object.values(contactsMap);
 
     newCustomers.push({
       id: 'cst_' + Date.now() + '_' + Math.floor(Math.random()*1000),
@@ -3668,6 +3890,25 @@ function selectDailyCustomer(id, name) {
   const sel = document.getElementById('daily-selected');
   sel.textContent = '✓ ' + name + ' 선택됨';
   sel.style.display = 'block';
+  populateDailyAddressSelect(id);
+}
+
+// 선택된 고객사의 주소가 2개 이상이면 "어느 주소 건인지" 선택하게 한다.
+// 주소가 1개뿐이거나 없으면 굳이 물어볼 필요가 없어 드롭다운을 숨긴다.
+function populateDailyAddressSelect(custId) {
+  const c = customers.find(x => x.id === custId);
+  const group = document.getElementById('daily-address-group');
+  const sel = document.getElementById('daily-address-select');
+  const addrs = (c && c.addresses) || [];
+  if (!c || addrs.length <= 1) {
+    group.style.display = 'none';
+    sel.innerHTML = '';
+    return;
+  }
+  sel.innerHTML = addrs.map(a =>
+    `<option value="${a.id}">${a.label || a.address}</option>`
+  ).join('');
+  group.style.display = 'block';
 }
 
 // ==================== HISTORY ====================

@@ -874,7 +874,7 @@
   <div class="sheet-handle"></div>
   <div class="sheet-header">
     <div class="sheet-title" id="form-title">고객사 추가</div>
-    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
+    <button class="sheet-close" onclick="closeFormSheet()">✕</button>
   </div>
   <div class="sheet-body">
     <div class="form-group">
@@ -926,7 +926,7 @@
   <div class="sheet-handle"></div>
   <div class="sheet-header">
     <div class="sheet-title">컨택 기록</div>
-    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
+    <button class="sheet-close" onclick="closeDailySheet()">✕</button>
   </div>
   <div class="sheet-body">
     <div class="form-group">
@@ -987,7 +987,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v4.01</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v4.02</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -2500,7 +2500,7 @@ function openDetail(id, origin, addressId, keepSelection) {
     <div class="action-row">
       <button class="action-btn primary" onclick="openQuickLog('${id}', ${filterAddrId ? `'${filterAddrId}'` : 'null'})">✏️ 컨택 기록</button>
       <button class="action-btn secondary" onclick="openEditSheet('${id}')">수정</button>
-      <button class="action-btn map-btn" onclick="moveToMarker('${id}')">📍 지도에서 보기</button>
+      <button class="action-btn map-btn" onclick="moveToMarker('${id}', ${filterAddrId ? `'${filterAddrId}'` : 'null'})">📍 지도에서 보기</button>
       <button class="action-btn map-btn" onclick="openRoadview('${id}')">🔭 로드뷰</button>
       <button class="action-btn danger" onclick="deleteCustomer('${id}')">삭제</button>
     </div>
@@ -2552,10 +2552,16 @@ function openRoadview(id) {
   }
 }
 
-function moveToMarker(id) {
+function moveToMarker(id, addressId) {
   const c = customers.find(x => x.id === id);
-  if (!c || !c.lat) return;
-  map.setCenter(new kakao.maps.LatLng(c.lat, c.lng));
+  if (!c) return;
+  let lat = c.lat, lng = c.lng;
+  if (addressId) {
+    const addr = (c.addresses || []).find(a => a.id === addressId);
+    if (addr && addr.lat) { lat = addr.lat; lng = addr.lng; }
+  }
+  if (!lat) { showToast('주소 또는 좌표가 없습니다'); return; }
+  map.setCenter(new kakao.maps.LatLng(lat, lng));
   map.setLevel(4);
   closeAllSheets();
 }
@@ -2564,7 +2570,9 @@ function moveToMarker(id) {
 function openQuickLog(id, addressId) {
   const c = customers.find(x => x.id === id);
   if (!c) return;
-  closeAllSheets();
+  // 어디서 왔는지 기록 (X 눌렀을 때 복귀용)
+  dailySheetOrigin = 'detail:' + id + ':' + (addressId || '');
+  closeSheet('detail-sheet');
   setTimeout(() => {
     openSheet('daily-sheet', id, c.name, addressId || null);
   }, 200);
@@ -2603,7 +2611,7 @@ function openEditSheet(id) {
   (c.addresses || []).forEach(a => addAddressRow(a));
   if (!c.addresses || c.addresses.length === 0) addAddressRow();
 
-  closeAllSheets();
+  closeSheet('detail-sheet');
   setTimeout(() => openSheet('form-sheet'), 200);
 }
 
@@ -2784,7 +2792,7 @@ async function submitForm() {
     await saveData();
     renderAllMarkers();
     renderListBody();
-    closeAllSheets();
+    closeFormSheet();
     showToast(editingCustomerId ? '수정되었습니다' : '고객사가 추가되었습니다');
     isSaving = false;
   } catch(err) {
@@ -3551,6 +3559,33 @@ function closeDetailSheet() {
   }
   detailSheetOrigin = null;
   detailSelectedAddrId = null;
+}
+
+// 수정/추가 폼 닫기: 수정 중이면 상세화면으로, 신규 추가면 지도로
+function closeFormSheet() {
+  closeSheet('form-sheet');
+  if (editingCustomerId) {
+    // 수정 중이었으면 → 상세화면으로 복귀
+    setTimeout(() => openDetail(editingCustomerId, detailSheetOrigin, detailSelectedAddrId), 50);
+  } else if (detailSheetOrigin === 'list') {
+    setTimeout(() => openSheet('list-sheet'), 50);
+  }
+  // 신규 추가였으면 그냥 지도로
+}
+
+// 컨택 기록 닫기: 상세화면에서 왔으면 상세화면으로, 목록에서 왔으면 목록으로
+let dailySheetOrigin = null; // 'detail:<id>:<addrId>' | 'list' | null
+function closeDailySheet() {
+  closeSheet('daily-sheet');
+  if (dailySheetOrigin && dailySheetOrigin.startsWith('detail:')) {
+    const parts = dailySheetOrigin.split(':');
+    const custId = parts[1];
+    const addrId = parts[2] || null;
+    setTimeout(() => openDetail(custId, detailSheetOrigin, addrId || null), 50);
+  } else if (detailSheetOrigin === 'list') {
+    setTimeout(() => openSheet('list-sheet'), 50);
+  }
+  dailySheetOrigin = null;
 }
 
 function closeAllSheets() {

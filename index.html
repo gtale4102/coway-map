@@ -916,6 +916,7 @@
   <div class="sheet-handle"></div>
   <div class="sheet-header">
     <div class="sheet-title" id="list-sheet-title">전체 고객사</div>
+    <button class="icon-btn" style="margin-right:6px;" onclick="openFolderPicker()" title="폴더 관리">📁</button>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div id="list-select-toolbar" style="display:none; align-items:center; gap:8px; padding:8px 16px; border-bottom:1px solid var(--border);">
@@ -995,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.07</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.08</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1185,6 +1186,17 @@
     <button class="add-entry-btn" style="margin-top:0; padding:8px 10px;" onclick="createManualFolderFromPicker()">추가</button>
   </div>
   <button class="action-btn secondary" style="width:100%; margin-top:10px; padding:8px;" onclick="closeFolderPicker()">닫기</button>
+</div>
+
+<!-- EXIT CONFIRM POPUP (뒤로가기) -->
+<div id="exit-confirm-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:900;"></div>
+<div id="exit-confirm-popup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:901; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; width:260px; max-width:calc(100vw - 40px); text-align:center;">
+  <div style="font-size:15px; font-weight:700; margin-bottom:8px;">앱을 종료할까요?</div>
+  <div style="font-size:13px; color:var(--text2); margin-bottom:16px;">뒤로 갈 화면이 더 없어요</div>
+  <div style="display:flex; gap:8px;">
+    <button class="action-btn secondary" style="flex:1; padding:10px;" onclick="cancelExitApp()">취소</button>
+    <button class="action-btn danger" style="flex:1; padding:10px;" onclick="confirmExitApp()">종료</button>
+  </div>
 </div>
 
 <!-- 같은 주소에 병합된 핀 클릭 시 고객사 선택 팝업 -->
@@ -2774,6 +2786,7 @@ function openAddressSearch(targetInput) {
   const container = document.getElementById('address-search-container');
   container.innerHTML = '';
   overlay.style.display = 'flex';
+  pushNavGuard();
 
   try {
     new daum.Postcode({
@@ -3236,21 +3249,29 @@ function toggleListFolder(key) {
 
 // ==================== 수동 폴더 (사용자 생성/해체 + 이동) ====================
 function openFolderPicker() {
-  if (selectedListIds.size === 0) { showToast('먼저 고객사를 선택해주세요'); return; }
+  renderFolderPickerList();
+  document.getElementById('folder-picker-backdrop').style.display = 'block';
+  document.getElementById('folder-picker-popup').style.display = 'block';
+  document.getElementById('folder-picker-new-name').value = '';
+  pushNavGuard();
+}
+
+function renderFolderPickerList() {
   const listEl = document.getElementById('folder-picker-list');
+  const hasSelection = selectedListIds.size > 0;
   if (manualFolders.length === 0) {
     listEl.innerHTML = '<div style="font-size:12px; color:var(--text2); padding:6px 0;">아직 만든 폴더가 없어요</div>';
   } else {
     listEl.innerHTML = manualFolders.map(f => `
       <div style="display:flex; align-items:center; gap:6px; padding:8px 0; border-bottom:1px solid var(--border);">
-        <span style="flex:1; font-size:13px; cursor:pointer;" onclick="assignSelectedToFolder('${f.id}')">📁 ${f.name}</span>
-        <button class="remove-btn" title="폴더 해체" onclick="dissolveManualFolder('${f.id}')">−</button>
+        <span style="flex:1; font-size:13px; ${hasSelection ? 'cursor:pointer;' : ''}" ${hasSelection ? `onclick="assignSelectedToFolder('${f.id}')"` : ''}>📁 ${f.name}</span>
+        ${hasSelection ? `<button class="action-btn secondary" style="padding:5px 8px; font-size:11px;" onclick="assignSelectedToFolder('${f.id}')">이동</button>` : ''}
+        <button class="action-btn danger" style="padding:5px 8px; font-size:11px;" onclick="dissolveManualFolder('${f.id}')">삭제</button>
       </div>`).join('');
   }
-  listEl.innerHTML += `<div style="padding:8px 0; font-size:13px; cursor:pointer; color:var(--text2);" onclick="assignSelectedToFolder(null)">📤 폴더에서 빼기(미지정)</div>`;
-  document.getElementById('folder-picker-backdrop').style.display = 'block';
-  document.getElementById('folder-picker-popup').style.display = 'block';
-  document.getElementById('folder-picker-new-name').value = '';
+  if (hasSelection) {
+    listEl.innerHTML += `<div style="padding:8px 0; font-size:13px; cursor:pointer; color:var(--text2);" onclick="assignSelectedToFolder(null)">📤 폴더에서 빼기(미지정)</div>`;
+  }
 }
 
 function closeFolderPicker() {
@@ -3264,7 +3285,15 @@ function createManualFolderFromPicker() {
   if (!name) { showToast('폴더 이름을 입력해주세요'); return; }
   const folder = { id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name };
   manualFolders.push(folder);
-  assignSelectedToFolder(folder.id);
+  if (selectedListIds.size > 0) {
+    assignSelectedToFolder(folder.id);
+  } else {
+    saveData();
+    renderFolderPickerList();
+    renderListBody();
+    input.value = '';
+    showToast('폴더를 만들었습니다');
+  }
 }
 
 function assignSelectedToFolder(folderId) {
@@ -3283,7 +3312,7 @@ function dissolveManualFolder(folderId) {
   customers.forEach(c => { if (c.manualFolderId === folderId) delete c.manualFolderId; });
   manualFolders = manualFolders.filter(f => f.id !== folderId);
   saveData();
-  openFolderPicker();
+  renderFolderPickerList();
   renderListBody();
 }
 
@@ -3341,6 +3370,7 @@ function enterListSelectMode(firstId) {
   document.getElementById('list-longpress-hint').style.display = 'none';
   updateListSelectToolbar();
   renderListBody();
+  pushNavGuard();
 }
 
 function exitListSelectMode() {
@@ -3779,6 +3809,7 @@ document.addEventListener('click', () => {
 function openSheet(id, arg1, arg2, arg3) {
   document.getElementById('overlay').classList.add('open');
   document.getElementById(id).classList.add('open');
+  pushNavGuard();
   if (id === 'list-sheet') {
     listSelectMode = false;
     selectedListIds = new Set();
@@ -3852,6 +3883,87 @@ function closeAllSheets() {
   document.querySelectorAll('.bottom-sheet').forEach(s => s.classList.remove('open'));
   document.getElementById('overlay').classList.remove('open');
 }
+
+// ==================== 모바일 뒤로가기 버튼 처리 ====================
+// 열려있는 화면/팝업이 있으면 하나씩 닫고(직전 단계로 회귀), 더 닫을 게 없으면 종료 확인 팝업을 띄운다.
+let backExiting = false;
+
+function pushNavGuard() {
+  if (backExiting) return;
+  history.pushState({ navGuard: true }, '', location.href);
+}
+
+function isVisible(id) {
+  const el = document.getElementById(id);
+  if (!el) return false;
+  if (el.classList.contains('bottom-sheet')) return el.classList.contains('open');
+  if (el.classList.contains('color-picker-popup')) return el.classList.contains('open');
+  if (el.classList.contains('route-panel')) return el.classList.contains('open');
+  return el.style.display === 'flex' || el.style.display === 'block';
+}
+
+function closeTopmostLayer() {
+  // 위에 떠 있는 팝업/오버레이류부터 우선 처리 (표시 순서상 가장 위에 있는 것들)
+  if (isVisible('exit-confirm-popup')) { cancelExitApp(); return true; }
+  if (isVisible('folder-picker-popup')) { closeFolderPicker(); return true; }
+  if (isVisible('color-picker')) { document.getElementById('color-picker').classList.remove('open'); return true; }
+  if (isVisible('address-search-overlay')) { closeAddressSearch(); return true; }
+  if (isVisible('route-picker')) { closeRoutePicker(); return true; }
+  if (isVisible('route-panel')) { toggleRoutePanel(); return true; }
+
+  // 목록 화면에서 선택 모드 중이면 선택 해제부터
+  if (listSelectMode) { exitListSelectMode(); return true; }
+
+  // 바텀시트 (각 시트 고유의 복귀 로직 사용 - 예: 상세->목록, 폼->상세 등)
+  const sheetCloseMap = {
+    'detail-sheet': closeDetailSheet,
+    'form-sheet': closeFormSheet,
+    'daily-sheet': closeDailySheet,
+    'list-sheet': closeAllSheets,
+    'category-sheet': closeAllSheets,
+    'settings-sheet': closeAllSheets,
+    'history-sheet': closeAllSheets,
+    'remind-sheet': closeAllSheets,
+    'pdf-options-sheet': closeAllSheets,
+    'excel-import-sheet': closeAllSheets,
+    'trash-sheet': closeAllSheets,
+  };
+  for (const id in sheetCloseMap) {
+    if (isVisible(id)) { sheetCloseMap[id](); return true; }
+  }
+
+  return false; // 더 닫을 게 없음 = 지도 첫 화면
+}
+
+function showExitConfirm() {
+  document.getElementById('exit-confirm-backdrop').style.display = 'block';
+  document.getElementById('exit-confirm-popup').style.display = 'block';
+}
+
+function cancelExitApp() {
+  document.getElementById('exit-confirm-backdrop').style.display = 'none';
+  document.getElementById('exit-confirm-popup').style.display = 'none';
+  pushNavGuard(); // 다시 뒤로가기를 트랩해서, 실수로 앱이 꺼지지 않게 함
+}
+
+function confirmExitApp() {
+  document.getElementById('exit-confirm-backdrop').style.display = 'none';
+  document.getElementById('exit-confirm-popup').style.display = 'none';
+  backExiting = true; // 더 이상 뒤로가기를 가로채지 않음 -> 다음 뒤로가기(또는 이 popstate 이후)에 실제로 앱을 벗어남
+}
+
+window.addEventListener('popstate', function() {
+  if (backExiting) return;
+  const closedSomething = closeTopmostLayer();
+  if (closedSomething) {
+    pushNavGuard();
+  } else {
+    showExitConfirm();
+  }
+});
+
+// 앱 로드 시 뒤로가기를 가로챌 수 있도록 기준 상태를 하나 쌓아둔다
+window.addEventListener('load', () => { pushNavGuard(); });
 
 // ==================== EXPORT/IMPORT ====================
 function updateOwnerLabel() {
@@ -4620,6 +4732,7 @@ function toggleRoutePanel() {
   const panel = document.getElementById('route-panel');
   panel.classList.toggle('open');
   if (panel.classList.contains('open')) {
+    pushNavGuard();
     renderRouteStops();
     renderRouteHistory();
     const gpsBtn = document.getElementById('origin-gps-btn');
@@ -4647,6 +4760,7 @@ function openRouteAddPicker() {
   setRoutePickerTab('customer');
   renderRoutePicker();
   document.getElementById('route-picker').classList.add('open');
+  pushNavGuard();
 }
 
 function setRoutePickerTab(tab) {

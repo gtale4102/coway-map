@@ -983,7 +983,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.00</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.01</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -2687,11 +2687,46 @@ function addAddressRow(a = {}) {
       <button class="add-entry-btn" style="flex:1; margin-top:0; padding:6px;" onclick="openAddressSearch(this.closest('.addr-wrap').querySelector('.addr-addr'))">🔍 주소 검색</button>
       <input type="text" class="form-input addr-detail" placeholder="상세주소(동/호수 등)" value="${a.detail || ''}" style="flex:1.5;">
     </div>
+    <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;" class="same-contact-row" style="display:none;">
+      <label style="display:flex; align-items:center; gap:5px; font-size:12px; color:var(--text2); cursor:pointer;">
+        <input type="checkbox" class="addr-same-contact" onchange="applySameContact(this)" style="width:14px;height:14px;">
+        위와 동일한 담당자
+      </label>
+    </div>
     <div style="display:flex; gap:6px;">
       <input type="text" class="form-input addr-contact-name" placeholder="담당자 이름" value="${a.contactName || ''}" style="flex:1;">
       <input type="tel" class="form-input addr-contact-phone" placeholder="전화번호" value="${a.contactPhone || ''}" style="flex:1.5;">
     </div>`;
   document.getElementById('f-addresses').appendChild(wrap);
+  // 두 번째 주소부터 "위와 동일" 체크박스 표시
+  const allWraps = document.querySelectorAll('#f-addresses .addr-wrap');
+  if (allWraps.length > 1) {
+    wrap.querySelector('.same-contact-row').style.display = 'flex';
+  }
+}
+
+function applySameContact(checkbox) {
+  const wrap = checkbox.closest('.addr-wrap');
+  const allWraps = [...document.querySelectorAll('#f-addresses .addr-wrap')];
+  const idx = allWraps.indexOf(wrap);
+  const nameInput = wrap.querySelector('.addr-contact-name');
+  const phoneInput = wrap.querySelector('.addr-contact-phone');
+  if (checkbox.checked && idx > 0) {
+    const prevWrap = allWraps[idx - 1];
+    nameInput.value = prevWrap.querySelector('.addr-contact-name')?.value || '';
+    phoneInput.value = prevWrap.querySelector('.addr-contact-phone')?.value || '';
+    nameInput.disabled = true;
+    phoneInput.disabled = true;
+    nameInput.style.opacity = '0.5';
+    phoneInput.style.opacity = '0.5';
+  } else {
+    nameInput.disabled = false;
+    phoneInput.disabled = false;
+    nameInput.style.opacity = '1';
+    phoneInput.style.opacity = '1';
+    nameInput.value = '';
+    phoneInput.value = '';
+  }
 }
 
 let addressSearchTarget = null;
@@ -3373,28 +3408,64 @@ function onSearch() {
 
   res.innerHTML = matches.map(c => {
     const color = getCategoryColor(c.category);
-    const labels = (c.addresses || []).map(a => a.label).filter(Boolean);
-    const labelText = labels.length > 0 ? labels.join(' · ') : '주소구분 없음';
-    return `<div class="result-item" onclick="selectSearchResult('${c.id}')">
-      <span class="legend-dot" style="background:${color};"></span>
-      <span style="flex:1;">
-        <span style="font-weight:600;">${c.name}</span>
-        <span style="color:var(--text2); font-size:12px; margin-left:6px;">${labelText}</span>
-      </span>
-    </div>`;
+    const addrs = (c.addresses || []).filter(a => a.lat);
+    if (addrs.length > 1) {
+      // 주소 여러 개 — 고객사명 클릭하면 하위 주소 펼쳐짐
+      const addrItems = addrs.map(a =>
+        `<div class="result-item" style="padding-left:28px; background:var(--surface2);" onclick="selectSearchResultAddr('${c.id}','${a.id}')">
+          <span style="color:var(--text2); font-size:12px;">📍 ${a.label || a.address}</span>
+        </div>`
+      ).join('');
+      return `<div>
+        <div class="result-item" onclick="toggleSearchAddrList(this)">
+          <span class="legend-dot" style="background:${color};"></span>
+          <span style="flex:1;"><span style="font-weight:600;">${c.name}</span>
+          <span style="color:var(--text2); font-size:12px; margin-left:6px;">${addrs.length}개 주소</span></span>
+          <span style="color:var(--text2);">▾</span>
+        </div>
+        <div class="search-addr-list" style="display:none;">${addrItems}</div>
+      </div>`;
+    } else {
+      const addrLabel = addrs.length === 1 ? (addrs[0].label || addrs[0].address) : '주소 없음';
+      return `<div class="result-item" onclick="selectSearchResultAddr('${c.id}', '${addrs.length === 1 ? addrs[0].id : ''}')">
+        <span class="legend-dot" style="background:${color};"></span>
+        <span style="flex:1;">
+          <span style="font-weight:600;">${c.name}</span>
+          <span style="color:var(--text2); font-size:12px; margin-left:6px;">${addrLabel}</span>
+        </span>
+      </div>`;
+    }
   }).join('');
   res.style.display = 'block';
 }
 
-function selectSearchResult(id) {
+function toggleSearchAddrList(el) {
+  const list = el.nextElementSibling;
+  const arrow = el.querySelector('span:last-child');
+  if (list.style.display === 'none') {
+    list.style.display = 'block';
+    arrow.textContent = '▴';
+  } else {
+    list.style.display = 'none';
+    arrow.textContent = '▾';
+  }
+}
+
+function selectSearchResultAddr(custId, addrId) {
   document.getElementById('search-results').style.display = 'none';
   document.getElementById('search-input').value = '';
-  const c = customers.find(x => x.id === id);
-  if (c && c.lat) {
-    map.setCenter(new kakao.maps.LatLng(c.lat, c.lng));
+  const c = customers.find(x => x.id === custId);
+  if (!c) return;
+  // 선택한 주소 좌표로 지도 이동
+  let lat = c.lat, lng = c.lng;
+  if (addrId) {
+    const addr = (c.addresses || []).find(a => a.id === addrId);
+    if (addr && addr.lat) { lat = addr.lat; lng = addr.lng; }
+  }
+  if (lat && lng) {
+    map.setCenter(new kakao.maps.LatLng(lat, lng));
     map.setLevel(4);
   }
-  openDetail(id);
 }
 
 // 검색창 오른쪽 버튼: 검색어가 포함된 모든 고객사를 지도에 필터링해서 표시

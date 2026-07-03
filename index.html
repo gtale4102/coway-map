@@ -694,9 +694,13 @@
     #address-search-overlay {
       left: 50% !important;
       right: auto !important;
+      top: auto !important;
       transform: translateX(-50%);
       width: 440px;
       max-width: calc(100vw - 32px);
+      height: 600px;
+      max-height: calc(100vh - 32px);
+      border-radius: 20px 20px 0 0;
       box-shadow: 0 0 0 1px var(--border), 0 8px 32px rgba(0,0,0,0.3);
     }
   }
@@ -983,7 +987,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.02</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.03</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">

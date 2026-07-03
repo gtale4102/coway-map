@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.20</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.21</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1047,6 +1047,7 @@
       <label for="import-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">가져오기</label>
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
     </div>
+    <div class="section-divider">📥 신규 고객사 대량 등록</div>
     <div class="setting-row">
       <div class="setting-info">
         <div class="setting-title">엑셀 양식 다운로드</div>
@@ -1057,27 +1058,29 @@
     <div class="setting-row">
       <div class="setting-info">
         <div class="setting-title">고객사 일괄 가져오기</div>
-        <div class="setting-desc">엑셀 양식으로 여러 고객사 한번에 추가</div>
+        <div class="setting-desc">위 양식으로 새 고객사를 한번에 추가 (항상 신규 추가됨)</div>
       </div>
       <label for="excel-import-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">엑셀 가져오기</label>
       <input type="file" id="excel-import-file" accept=".xlsx,.xls" style="display:none" onchange="handleExcelImport(event)">
     </div>
+    <div class="section-divider">✏️ 기존 고객사 데이터 수정</div>
     <div class="setting-row">
       <div class="setting-info">
-        <div class="setting-title">고객사 데이터 내보내기(수정용)</div>
-        <div class="setting-desc">기존 고객사를 엑셀로 내보내 수정 후 재가져오기</div>
+        <div class="setting-title">고객사 데이터 내보내기</div>
+        <div class="setting-desc">기존 고객사 전체를 엑셀로 내보내기 (수정용 별도 양식)</div>
       </div>
       <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="exportCustomerDataForEdit()">내보내기</button>
     </div>
     <div class="setting-row">
       <div class="setting-info">
-        <div class="setting-title">재가져오기(수정용)</div>
-        <div class="setting-desc">위에서 내보낸 파일을 수정 후 다시 불러와 반영</div>
+        <div class="setting-title">수정 후 재가져오기</div>
+        <div class="setting-desc">위에서 내보낸 파일을 수정 후 다시 불러와 반영 (미리보기 확인 후 적용)</div>
       </div>
       <label for="reimport-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">재가져오기</label>
       <input type="file" id="reimport-file" accept=".xlsx,.xls" style="display:none" onchange="handleReimportFile(event)">
     </div>
     <div class="setting-row">
+
       <div class="setting-info">
         <div class="setting-title">휴지통</div>
         <div class="setting-desc" id="trash-count-desc">삭제한 고객사 복원</div>

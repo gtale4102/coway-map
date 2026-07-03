@@ -916,7 +916,7 @@
   <div class="sheet-handle"></div>
   <div class="sheet-header">
     <div class="sheet-title" id="list-sheet-title">전체 고객사</div>
-    <button class="icon-btn" style="margin-right:6px;" onclick="openFolderPicker()" title="폴더 관리">📁</button>
+    <button class="icon-btn" style="margin-right:6px;" onclick="openFolderCreatePopup()" title="폴더 만들기">📁</button>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div id="list-select-toolbar" style="display:none; align-items:center; gap:8px; padding:8px 16px; border-bottom:1px solid var(--border);">
@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.09</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.11</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1206,6 +1206,27 @@
   <div style="display:flex; gap:8px; margin-top:12px;">
     <button class="action-btn secondary" style="flex:1; padding:10px;" onclick="closeFolderRenamePopup()">취소</button>
     <button class="action-btn" style="flex:1; padding:10px;" onclick="confirmFolderRename()">저장</button>
+  </div>
+</div>
+
+<!-- FOLDER CREATE ONLY POPUP (목록 상단 📁 아이콘) -->
+<div id="folder-create-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:610;" onclick="closeFolderCreatePopup()"></div>
+<div id="folder-create-popup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:611; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px; width:260px; max-width:calc(100vw - 40px);">
+  <div style="font-weight:700; font-size:14px; margin-bottom:10px;">새 폴더 만들기</div>
+  <input type="text" class="form-input" id="folder-create-input" placeholder="폴더 이름" style="width:100%; font-size:13px;">
+  <div style="display:flex; gap:8px; margin-top:12px;">
+    <button class="action-btn secondary" style="flex:1; padding:10px;" onclick="closeFolderCreatePopup()">닫기</button>
+    <button class="action-btn" style="flex:1; padding:10px;" onclick="createManualFolderStandalone()">만들기</button>
+  </div>
+</div>
+
+<!-- GENERIC CONFIRM POPUP (native confirm() 대신 사용 - 일부 인앱브라우저 호환) -->
+<div id="generic-confirm-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:900;"></div>
+<div id="generic-confirm-popup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:901; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; width:270px; max-width:calc(100vw - 40px); text-align:center;">
+  <div id="generic-confirm-message" style="font-size:14px; margin-bottom:16px; line-height:1.5;"></div>
+  <div style="display:flex; gap:8px;">
+    <button class="action-btn secondary" style="flex:1; padding:10px;" onclick="genericConfirmCancel()">취소</button>
+    <button class="action-btn danger" style="flex:1; padding:10px;" onclick="genericConfirmOk()">확인</button>
   </div>
 </div>
 
@@ -3376,30 +3397,31 @@ function dissolveManualFolderFromMenu() {
   dissolveManualFolder(folderId);
 }
 
-async function deleteManualFolderWithMembers() {
+function deleteManualFolderWithMembers() {
   const folderId = contextMenuFolderId;
   const f = manualFolders.find(x => x.id === folderId);
   if (!f) return;
   const members = customers.filter(c => c.manualFolderId === folderId);
   closeFolderContextMenu();
-  if (!confirm(`"${f.name}" 폴더와 안에 있는 고객사 ${members.length}개를 모두 삭제할까요?\n(휴지통에서 복원 가능)`)) return;
+  showGenericConfirm(`"${f.name}" 폴더와 안에 있는 고객사 ${members.length}개를 모두 삭제할까요? (휴지통에서 복원 가능)`, async () => {
+    const ids = members.map(c => c.id);
+    if (ids.length > 0) markManyDeleted(ids);
+    customers = customers.filter(c => c.manualFolderId !== folderId);
+    const now = new Date().toISOString();
+    members.forEach(m => trash.unshift({ ...m, deletedAt: now }));
+    if (trash.length > 200) trash = trash.slice(0, 200);
 
-  const ids = members.map(c => c.id);
-  if (ids.length > 0) markManyDeleted(ids);
-  customers = customers.filter(c => c.manualFolderId !== folderId);
-  const now = new Date().toISOString();
-  members.forEach(m => trash.unshift({ ...m, deletedAt: now }));
-  if (trash.length > 200) trash = trash.slice(0, 200);
-
-  manualFolders = manualFolders.filter(x => x.id !== folderId);
-  renderAllMarkers();
-  await saveData();
-  renderListBody();
-  showToast(`폴더와 고객사 ${ids.length}개를 삭제했습니다 (휴지통에서 복원 가능)`);
+    manualFolders = manualFolders.filter(x => x.id !== folderId);
+    renderAllMarkers();
+    await saveData();
+    renderListBody();
+    showToast(`폴더와 고객사 ${ids.length}개를 삭제했습니다 (휴지통에서 복원 가능)`);
+  });
 }
 
-// ==================== 수동 폴더 (사용자 생성/해체 + 이동) ====================
+// ==================== 수동 폴더 (사용자 생성 + 이동) ====================
 function openFolderPicker() {
+  if (selectedListIds.size === 0) { showToast('먼저 고객사를 선택해주세요'); return; }
   renderFolderPickerList();
   document.getElementById('folder-picker-backdrop').style.display = 'block';
   document.getElementById('folder-picker-popup').style.display = 'block';
@@ -3409,20 +3431,16 @@ function openFolderPicker() {
 
 function renderFolderPickerList() {
   const listEl = document.getElementById('folder-picker-list');
-  const hasSelection = selectedListIds.size > 0;
   if (manualFolders.length === 0) {
     listEl.innerHTML = '<div style="font-size:12px; color:var(--text2); padding:6px 0;">아직 만든 폴더가 없어요</div>';
   } else {
     listEl.innerHTML = manualFolders.map(f => `
       <div style="display:flex; align-items:center; gap:6px; padding:8px 0; border-bottom:1px solid var(--border);">
-        <span style="flex:1; font-size:13px; ${hasSelection ? 'cursor:pointer;' : ''}" ${hasSelection ? `onclick="assignSelectedToFolder('${f.id}')"` : ''}>📁 ${f.name}</span>
-        ${hasSelection ? `<button class="action-btn secondary" style="padding:5px 8px; font-size:11px;" onclick="assignSelectedToFolder('${f.id}')">이동</button>` : ''}
-        <button class="action-btn danger" style="padding:5px 8px; font-size:11px;" onclick="dissolveManualFolder('${f.id}')">삭제</button>
+        <span style="flex:1; font-size:13px; cursor:pointer;" onclick="assignSelectedToFolder('${f.id}')">📁 ${f.name}</span>
+        <button class="action-btn secondary" style="padding:5px 8px; font-size:11px;" onclick="assignSelectedToFolder('${f.id}')">이동</button>
       </div>`).join('');
   }
-  if (hasSelection) {
-    listEl.innerHTML += `<div style="padding:8px 0; font-size:13px; cursor:pointer; color:var(--text2);" onclick="assignSelectedToFolder(null)">📤 폴더에서 빼기(미지정)</div>`;
-  }
+  listEl.innerHTML += `<div style="padding:8px 0; font-size:13px; cursor:pointer; color:var(--text2);" onclick="assignSelectedToFolder(null)">📤 폴더에서 빼기(미지정)</div>`;
 }
 
 function closeFolderPicker() {
@@ -3436,15 +3454,7 @@ function createManualFolderFromPicker() {
   if (!name) { showToast('폴더 이름을 입력해주세요'); return; }
   const folder = { id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name };
   manualFolders.push(folder);
-  if (selectedListIds.size > 0) {
-    assignSelectedToFolder(folder.id);
-  } else {
-    saveData();
-    renderFolderPickerList();
-    renderListBody();
-    input.value = '';
-    showToast('폴더를 만들었습니다');
-  }
+  assignSelectedToFolder(folder.id);
 }
 
 function assignSelectedToFolder(folderId) {
@@ -3458,13 +3468,63 @@ function assignSelectedToFolder(folderId) {
   showToast(folderId ? '폴더로 이동했습니다' : '폴더에서 뺐습니다');
 }
 
-function dissolveManualFolder(folderId) {
-  if (!confirm('이 폴더를 해체할까요? 폴더 안 고객사는 미지정 상태로 남아요.')) return;
-  customers.forEach(c => { if (c.manualFolderId === folderId) delete c.manualFolderId; });
-  manualFolders = manualFolders.filter(f => f.id !== folderId);
+// ---- 상단 📁 아이콘: 빈 폴더 생성 전용 ----
+function openFolderCreatePopup() {
+  document.getElementById('folder-create-input').value = '';
+  document.getElementById('folder-create-backdrop').style.display = 'block';
+  document.getElementById('folder-create-popup').style.display = 'block';
+  pushNavGuard();
+}
+
+function closeFolderCreatePopup() {
+  document.getElementById('folder-create-backdrop').style.display = 'none';
+  document.getElementById('folder-create-popup').style.display = 'none';
+}
+
+function createManualFolderStandalone() {
+  const input = document.getElementById('folder-create-input');
+  const name = (input.value || '').trim();
+  if (!name) { showToast('폴더 이름을 입력해주세요'); return; }
+  const folder = { id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name };
+  manualFolders.push(folder);
   saveData();
-  renderFolderPickerList();
   renderListBody();
+  input.value = '';
+  showToast('폴더를 만들었습니다');
+  input.focus();
+}
+
+// ---- 확인창을 브라우저 native confirm() 대신 자체 팝업으로 처리 ----
+// (일부 인앱브라우저에서 confirm()이 무시/차단되어 삭제가 동작하지 않는 문제 방지)
+let genericConfirmCallback = null;
+function showGenericConfirm(message, onConfirm) {
+  document.getElementById('generic-confirm-message').textContent = message;
+  genericConfirmCallback = onConfirm;
+  document.getElementById('generic-confirm-backdrop').style.display = 'block';
+  document.getElementById('generic-confirm-popup').style.display = 'block';
+  pushNavGuard();
+}
+function genericConfirmCancel() {
+  document.getElementById('generic-confirm-backdrop').style.display = 'none';
+  document.getElementById('generic-confirm-popup').style.display = 'none';
+  genericConfirmCallback = null;
+}
+function genericConfirmOk() {
+  const cb = genericConfirmCallback;
+  document.getElementById('generic-confirm-backdrop').style.display = 'none';
+  document.getElementById('generic-confirm-popup').style.display = 'none';
+  genericConfirmCallback = null;
+  if (cb) cb();
+}
+
+function dissolveManualFolder(folderId) {
+  showGenericConfirm('이 폴더를 해체할까요? 폴더 안 고객사는 미지정 상태로 남아요.', () => {
+    customers.forEach(c => { if (c.manualFolderId === folderId) delete c.manualFolderId; });
+    manualFolders = manualFolders.filter(f => f.id !== folderId);
+    saveData();
+    renderListBody();
+    showToast('폴더를 해체했습니다');
+  });
 }
 
 function attachListRowHandlers() {
@@ -3547,74 +3607,80 @@ function updateListSelectToolbar() {
   const el = document.getElementById('list-select-count');
   if (el) el.textContent = selectedListIds.size + '개 선택됨';
   const mergeBtn = document.getElementById('list-merge-btn');
-  if (mergeBtn) mergeBtn.style.display = (selectedListIds.size === 2) ? 'inline-flex' : 'none';
+  if (mergeBtn) mergeBtn.style.display = (selectedListIds.size >= 2) ? 'inline-flex' : 'none';
 }
 
-// ==================== 고객사 병합 ====================
-function openMergeConfirm() {
-  if (selectedListIds.size !== 2) return;
-  const [idA, idB] = [...selectedListIds];
-  const a = customers.find(c => c.id === idA);
-  const b = customers.find(c => c.id === idB);
-  if (!a || !b) return;
+// ==================== 고객사 병합 (2개 이상 가능) ====================
+let pendingMergeIds = [];
 
-  const sameCategory = a.category === b.category;
-  const catChoiceHtml = sameCategory ? '' : `
+function openMergeConfirm() {
+  if (selectedListIds.size < 2) return;
+  pendingMergeIds = [...selectedListIds];
+  const targets = pendingMergeIds.map(id => customers.find(c => c.id === id)).filter(Boolean);
+  if (targets.length < 2) return;
+  const base = targets[0]; // 가장 먼저 선택한 고객사가 기준(이름 유지)이 됨
+
+  const uniqueCategories = [...new Set(targets.map(c => c.category))];
+  const catChoiceHtml = uniqueCategories.length <= 1 ? '' : `
     <div style="margin-top:12px;">
-      <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">두 고객사의 분류가 달라요. 합친 뒤 분류를 선택하세요.</div>
+      <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">선택한 고객사들의 분류가 서로 달라요. 합친 뒤 분류를 선택하세요.</div>
       <div style="display:flex; flex-direction:column; gap:8px;">
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="radio" name="merge-cat-choice" value="${a.category}" checked>
-          <span class="legend-dot" style="background:${getCategoryColor(a.category)}; width:10px; height:10px; border-radius:50%; display:inline-block;"></span>
-          ${a.name} 기준 (${getCategoryName(a.category)})
-        </label>
-        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
-          <input type="radio" name="merge-cat-choice" value="${b.category}">
-          <span class="legend-dot" style="background:${getCategoryColor(b.category)}; width:10px; height:10px; border-radius:50%; display:inline-block;"></span>
-          ${b.name} 기준 (${getCategoryName(b.category)})
-        </label>
+        ${uniqueCategories.map((cat, i) => {
+          const names = targets.filter(c => c.category === cat).map(c => c.name).join(', ');
+          return `<label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="radio" name="merge-cat-choice" value="${cat}" ${i === 0 ? 'checked' : ''}>
+            <span class="legend-dot" style="background:${getCategoryColor(cat)}; width:10px; height:10px; border-radius:50%; display:inline-block;"></span>
+            ${getCategoryName(cat)} (${names})
+          </label>`;
+        }).join('')}
       </div>
     </div>`;
 
+  const nameList = targets.map(c => `"${c.name}"`).join(', ');
   const overlay = document.getElementById('merged-pin-overlay');
   const list = document.getElementById('merged-pin-list');
   list.innerHTML = `
-    <div style="font-size:14px; font-weight:700; margin-bottom:4px;">두 고객사를 합칠까요?</div>
-    <div style="font-size:13px; color:var(--text2); margin-bottom:10px;">"${a.name}"과(와) "${b.name}"의 주소·담당자·이력이 "${a.name}" 하나로 합쳐집니다. 이 작업은 되돌릴 수 없어요.</div>
+    <div style="font-size:14px; font-weight:700; margin-bottom:4px;">${targets.length}개 고객사를 합칠까요?</div>
+    <div style="font-size:13px; color:var(--text2); margin-bottom:10px;">${nameList}의 주소·담당자·이력이 "${base.name}" 하나로 합쳐집니다. 이 작업은 되돌릴 수 없어요.</div>
     ${catChoiceHtml}
     <div style="display:flex; gap:8px; margin-top:16px;">
       <button class="action-btn secondary" style="flex:1;" onclick="closeMergedChooser()">취소</button>
-      <button class="action-btn primary" style="flex:1;" onclick="confirmMergeCustomers('${idA}','${idB}')">합치기</button>
+      <button class="action-btn primary" style="flex:1;" onclick="confirmMergeCustomers()">합치기</button>
     </div>`;
   overlay.style.display = 'flex';
 }
 
-async function confirmMergeCustomers(idA, idB) {
-  const a = customers.find(c => c.id === idA);
-  const b = customers.find(c => c.id === idB);
-  if (!a || !b) { closeMergedChooser(); return; }
+async function confirmMergeCustomers() {
+  const targets = pendingMergeIds.map(id => customers.find(c => c.id === id)).filter(Boolean);
+  if (targets.length < 2) { closeMergedChooser(); return; }
+  const a = targets[0];
+  const rest = targets.slice(1);
 
   const radios = document.querySelectorAll('input[name="merge-cat-choice"]');
   let finalCategory = a.category;
   radios.forEach(r => { if (r.checked) finalCategory = r.value; });
 
-  a.addresses = [...(a.addresses || []), ...(b.addresses || [])];
-  a.contacts = [...(a.contacts || []), ...(b.contacts || [])];
-  a.logs = [...(a.logs || []), ...(b.logs || [])];
+  rest.forEach(b => {
+    a.addresses = [...(a.addresses || []), ...(b.addresses || [])];
+    a.contacts = [...(a.contacts || []), ...(b.contacts || [])];
+    a.logs = [...(a.logs || []), ...(b.logs || [])];
+    if (!a.memo && b.memo) a.memo = b.memo;
+    else if (a.memo && b.memo && a.memo !== b.memo) a.memo = a.memo + ' / ' + b.memo;
+  });
   a.category = finalCategory;
-  if (!a.memo && b.memo) a.memo = b.memo;
-  else if (a.memo && b.memo && a.memo !== b.memo) a.memo = a.memo + ' / ' + b.memo;
   const firstAddr = a.addresses.find(x => x.lat);
   a.lat = firstAddr ? firstAddr.lat : a.lat;
   a.lng = firstAddr ? firstAddr.lng : a.lng;
 
-  customers = customers.filter(c => c.id !== idB);
+  const restIds = new Set(rest.map(c => c.id));
+  customers = customers.filter(c => !restIds.has(c.id));
+  pendingMergeIds = [];
 
   closeMergedChooser();
   exitListSelectMode();
   renderAllMarkers();
   await saveData();
-  showToast('병합되었습니다');
+  showToast(targets.length + '개 고객사가 합쳐졌습니다');
   openSheet('list-sheet');
 }
 
@@ -4056,6 +4122,8 @@ function isVisible(id) {
 function closeTopmostLayer() {
   // 위에 떠 있는 팝업/오버레이류부터 우선 처리 (표시 순서상 가장 위에 있는 것들)
   if (isVisible('exit-confirm-popup')) { cancelExitApp(); return true; }
+  if (isVisible('generic-confirm-popup')) { genericConfirmCancel(); return true; }
+  if (isVisible('folder-create-popup')) { closeFolderCreatePopup(); return true; }
   if (isVisible('folder-rename-popup')) { closeFolderRenamePopup(); return true; }
   if (isVisible('folder-context-menu-popup')) { closeFolderContextMenu(); return true; }
   if (isVisible('folder-picker-popup')) { closeFolderPicker(); return true; }

@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.12</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.20</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1061,6 +1061,21 @@
       </div>
       <label for="excel-import-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">엑셀 가져오기</label>
       <input type="file" id="excel-import-file" accept=".xlsx,.xls" style="display:none" onchange="handleExcelImport(event)">
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-title">고객사 데이터 내보내기(수정용)</div>
+        <div class="setting-desc">기존 고객사를 엑셀로 내보내 수정 후 재가져오기</div>
+      </div>
+      <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="exportCustomerDataForEdit()">내보내기</button>
+    </div>
+    <div class="setting-row">
+      <div class="setting-info">
+        <div class="setting-title">재가져오기(수정용)</div>
+        <div class="setting-desc">위에서 내보낸 파일을 수정 후 다시 불러와 반영</div>
+      </div>
+      <label for="reimport-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">재가져오기</label>
+      <input type="file" id="reimport-file" accept=".xlsx,.xls" style="display:none" onchange="handleReimportFile(event)">
     </div>
     <div class="setting-row">
       <div class="setting-info">
@@ -1151,6 +1166,18 @@
   </div>
   <div class="sheet-body" id="excel-import-body">
     <div class="empty-state"><div>📥</div>처리 중입니다...</div>
+  </div>
+</div>
+
+<!-- REIMPORT(수정용) PREVIEW SHEET -->
+<div class="bottom-sheet" id="reimport-sheet">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <div class="sheet-title">🔄 재가져오기(수정용) 미리보기</div>
+    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
+  </div>
+  <div class="sheet-body" id="reimport-body">
+    <div class="empty-state"><div>🔄</div>파일을 읽는 중입니다...</div>
   </div>
 </div>
 
@@ -4159,6 +4186,7 @@ function closeTopmostLayer() {
     'remind-sheet': closeAllSheets,
     'pdf-options-sheet': closeAllSheets,
     'excel-import-sheet': closeAllSheets,
+    'reimport-sheet': closeAllSheets,
     'trash-sheet': closeAllSheets,
   };
   for (const id in sheetCloseMap) {
@@ -4497,6 +4525,573 @@ async function processExcelImport(rows) {
   resultHtml += `<button class="submit-btn" onclick="closeAllSheets()" style="margin-top:16px;">확인</button>`;
   document.getElementById('excel-import-body').innerHTML = resultHtml;
   showToast('가져오기 완료');
+}
+
+// ==================== 고객사 데이터 내보내기 + 재가져오기(수정용, 작업 D 2026-07) ====================
+// 기존 "고객사 일괄 가져오기"(신규 추가 전용, 미리보기 없음)와 별개의 흐름.
+// 이미 등록된 고객사를 엑셀로 내보내 수정한 뒤, ID 기반으로 매칭해 추가/수정/삭제 후보를
+// 미리보기로 보여주고 사용자가 확인·선택한 것만 반영한다. 삭제는 기존 deleteCustomer()와
+// 동일하게 markDeleted()+trash[] 소프트 삭제로만 처리(하드 삭제 없음). 로그/좌표/생성일은
+// 매칭된 레코드에서 건드리지 않는다. 지도앱의 customers[]/addresses[] 스키마 자체는 바꾸지
+// 않는다 — ID/체크섬/메타시트는 전부 엑셀 파일 안에만 존재하는 임시 정보.
+//
+// 동시 편집 대응: "삭제 후보"는 라이브 데이터가 아니라 "_메타"(veryHidden) 시트에 기록된
+// 내보내기 시점 스냅샷 기준으로만 판단한다 — 내보내기 이후 다른 사람이 추가한 데이터는
+// 애초에 메타 스냅샷에 없으므로 삭제 후보에 절대 안 들어간다. 각 행의 "_체크섬"(고객사 필드
+// + 그 행의 주소 필드를 합친 해시, 암호학적 용도 아님 - 순수 변경감지용)으로 "라이브 데이터가
+// 내보내기 이후 이미 바뀌었는지"를 감지해 "충돌"로 분리하고 자동으로 덮어쓰지 않는다.
+
+function _simpleChecksum(value) {
+  const str = JSON.stringify(value);
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  return hash.toString(36);
+}
+
+function _categoryNameById(categoryId, liveCategories) {
+  const c = liveCategories.find(x => x.id === categoryId);
+  return c ? c.name : '';
+}
+
+function _categoryIdByName(catName, liveCategories) {
+  if (!catName) return UNCATEGORIZED_ID;
+  const matched = liveCategories.find(c => c.name === catName);
+  return matched ? matched.id : UNCATEGORIZED_ID;
+}
+
+// customers[] 배열로부터 내보내기용 (메인 시트 행 목록, 메타 스냅샷 목록) 생성. 순수 함수.
+function buildExportRows(liveCustomers, liveCategories) {
+  const rowsOut = [];
+  const metaRows = [];
+  liveCustomers.forEach(c => {
+    const catName = _categoryNameById(c.category, liveCategories);
+    const addrs = c.addresses || [];
+    if (addrs.length === 0) {
+      const checksum = _simpleChecksum([[c.name || '', c.owner || '', catName, c.memo || ''], ['', '', '', '', '']]);
+      rowsOut.push({
+        '고객사명': c.name || '', '소유자': c.owner || '', '분류': catName, '메모': c.memo || '',
+        '주소구분': '', '주소': '', '상세주소': '', '담당자명': '', '담당자 전화번호': '',
+        '_고객사ID': c.id, '_주소ID': '', '_체크섬': checksum,
+      });
+      metaRows.push({ 고객사ID: c.id, 주소ID: '' });
+    } else {
+      addrs.forEach(a => {
+        const checksum = _simpleChecksum([
+          [c.name || '', c.owner || '', catName, c.memo || ''],
+          [a.label || '', a.address || '', a.detail || '', a.contactName || '', a.contactPhone || ''],
+        ]);
+        rowsOut.push({
+          '고객사명': c.name || '', '소유자': c.owner || '', '분류': catName, '메모': c.memo || '',
+          '주소구분': a.label || '', '주소': a.address || '', '상세주소': a.detail || '',
+          '담당자명': a.contactName || '', '담당자 전화번호': a.contactPhone || '',
+          '_고객사ID': c.id, '_주소ID': a.id, '_체크섬': checksum,
+        });
+        metaRows.push({ 고객사ID: c.id, 주소ID: a.id });
+      });
+    }
+  });
+  return { rowsOut, metaRows };
+}
+
+// mainRows(재가져오기 파일의 메인 시트) + metaRows(내보내기 시점 스냅샷) + liveCustomers(비교 대상
+// 라이브 데이터, 최초 미리보기 때는 현재 customers[], 반영 직전 재검증 때는 새로 fetch한 데이터)를
+// 받아 추가/수정/삭제/충돌 후보를 계산한다. DOM·네트워크 의존 없는 순수 함수(단위 테스트 완료).
+function computeReimportDiff(mainRows, metaRows, liveCustomers, liveCategories) {
+  const liveById = new Map(liveCustomers.map(c => [c.id, c]));
+  const remainingCustIds = new Set();
+  const byExistingId = new Map();
+  const newGroups = new Map();
+
+  mainRows.forEach(row => {
+    const custId = (row['_고객사ID'] || '').toString().trim();
+    if (custId && liveById.has(custId)) {
+      remainingCustIds.add(custId);
+      if (!byExistingId.has(custId)) byExistingId.set(custId, []);
+      byExistingId.get(custId).push(row);
+    } else if (custId && !liveById.has(custId)) {
+      const key = '__missing__' + custId;
+      if (!byExistingId.has(key)) byExistingId.set(key, []);
+      byExistingId.get(key).push(row);
+    } else {
+      const name = (row['고객사명'] || '').trim();
+      if (!name) return;
+      if (!newGroups.has(name)) newGroups.set(name, []);
+      newGroups.get(name).push(row);
+    }
+  });
+
+  const result = { addedCustomers: [], customerChanges: [], deletedCustomers: [], conflicts: [], warnings: [] };
+
+  newGroups.forEach((rows, name) => {
+    const first = rows[0];
+    const addresses = rows.filter(r => (r['주소'] || '').trim()).map(r => ({
+      label: (r['주소구분'] || '').trim(), address: (r['주소'] || '').trim(), detail: (r['상세주소'] || '').trim(),
+      contactName: (r['담당자명'] || '').trim(), contactPhone: (r['담당자 전화번호'] || '').trim(),
+    }));
+    result.addedCustomers.push({
+      name, owner: (first['소유자'] || '').trim(), categoryName: (first['분류'] || '').trim(),
+      memo: (first['메모'] || '').trim(), addresses,
+    });
+  });
+
+  byExistingId.forEach((rows, key) => {
+    if (!key.startsWith('__missing__')) return;
+    result.conflicts.push({
+      type: 'customer_missing_in_live',
+      customerName: rows[0]['고객사명'] || '(알 수 없음)',
+      reason: '이 고객사는 내보내기 이후 다른 곳에서 이미 삭제된 것으로 보입니다.',
+    });
+  });
+
+  byExistingId.forEach((rows, custId) => {
+    if (custId.startsWith('__missing__')) return;
+    const live = liveById.get(custId);
+    const first = rows[0];
+    const liveCatName = _categoryNameById(live.category, liveCategories);
+
+    const custFieldCols = { '고객사명': 'name', '소유자': 'owner', '분류': 'categoryName', '메모': 'memo' };
+    Object.keys(custFieldCols).forEach(col => {
+      const vals = new Set(rows.map(r => (r[col] || '').trim()));
+      if (vals.size > 1) {
+        result.warnings.push(`'${live.name}' 고객사는 행마다 '${col}' 값이 다르게 입력되어 있어 첫 번째 값('${first[col]}')을 사용합니다.`);
+      }
+    });
+    const newCustVals = {
+      name: (first['고객사명'] || '').trim(), owner: (first['소유자'] || '').trim(),
+      categoryName: (first['분류'] || '').trim(), memo: (first['메모'] || '').trim(),
+    };
+    const custChanges = {};
+    if (newCustVals.name !== (live.name || '')) custChanges.name = { old: live.name || '', new: newCustVals.name };
+    if (newCustVals.owner !== (live.owner || '')) custChanges.owner = { old: live.owner || '', new: newCustVals.owner };
+    if (newCustVals.categoryName !== liveCatName) custChanges.category = { old: liveCatName, new: newCustVals.categoryName };
+    if (newCustVals.memo !== (live.memo || '')) custChanges.memo = { old: live.memo || '', new: newCustVals.memo };
+
+    const liveAddrById = new Map((live.addresses || []).map(a => [a.id, a]));
+    const addedAddresses = [];
+    const modifiedAddresses = [];
+    const addrConflicts = [];
+
+    rows.forEach(r => {
+      const addrId = (r['_주소ID'] || '').toString().trim();
+      const hasAddrText = (r['주소'] || '').trim() !== '';
+
+      if (addrId) {
+        const liveAddr = liveAddrById.get(addrId);
+        if (!liveAddr) {
+          addrConflicts.push({ addressId: addrId, reason: '이 주소는 내보내기 이후 다른 곳에서 이미 삭제되었거나 ID가 훼손되었습니다.' });
+          return;
+        }
+        const liveChecksumNow = _simpleChecksum([
+          [live.name || '', live.owner || '', liveCatName, live.memo || ''],
+          [liveAddr.label || '', liveAddr.address || '', liveAddr.detail || '', liveAddr.contactName || '', liveAddr.contactPhone || ''],
+        ]);
+        const fileChecksum = (r['_체크섬'] || '').toString();
+        if (fileChecksum && liveChecksumNow !== fileChecksum) {
+          addrConflicts.push({ addressId: addrId, reason: '이 고객사(또는 이 주소)는 내보내기 이후 다른 곳에서 이미 변경된 것으로 보입니다.' });
+          return;
+        }
+        const newAddrVals = {
+          label: (r['주소구분'] || '').trim(), address: (r['주소'] || '').trim(), detail: (r['상세주소'] || '').trim(),
+          contactName: (r['담당자명'] || '').trim(), contactPhone: (r['담당자 전화번호'] || '').trim(),
+        };
+        const addrChanges = {};
+        ['label', 'address', 'detail', 'contactName', 'contactPhone'].forEach(f => {
+          const liveVal = liveAddr[f] || '';
+          if (newAddrVals[f] !== liveVal) addrChanges[f] = { old: liveVal, new: newAddrVals[f] };
+        });
+        if (Object.keys(addrChanges).length > 0) modifiedAddresses.push({ addressId: addrId, changes: addrChanges });
+      } else if (hasAddrText) {
+        addedAddresses.push({
+          label: (r['주소구분'] || '').trim(), address: (r['주소'] || '').trim(), detail: (r['상세주소'] || '').trim(),
+          contactName: (r['담당자명'] || '').trim(), contactPhone: (r['담당자 전화번호'] || '').trim(),
+        });
+      } else {
+        const liveChecksumNow = _simpleChecksum([[live.name || '', live.owner || '', liveCatName, live.memo || ''], ['', '', '', '', '']]);
+        const fileChecksum = (r['_체크섬'] || '').toString();
+        if (fileChecksum && liveChecksumNow !== fileChecksum) {
+          addrConflicts.push({ addressId: null, reason: '이 고객사는 내보내기 이후 다른 곳에서 이미 변경된 것으로 보입니다.' });
+        }
+      }
+    });
+
+    const metaAddrIdsForCust = metaRows.filter(m => m.고객사ID === custId).map(m => m.주소ID).filter(Boolean);
+    const remainingAddrIdsForCust = new Set(rows.map(r => (r['_주소ID'] || '').toString().trim()).filter(Boolean));
+    const deletedAddresses = metaAddrIdsForCust
+      .filter(id => !remainingAddrIdsForCust.has(id) && liveAddrById.has(id))
+      .map(id => {
+        const a = liveAddrById.get(id);
+        return { addressId: id, label: a.label || a.address || id };
+      });
+
+    const anyConflict = addrConflicts.length > 0;
+    const anyChange = Object.keys(custChanges).length > 0 || addedAddresses.length > 0 || modifiedAddresses.length > 0 || deletedAddresses.length > 0;
+
+    if (anyConflict) {
+      result.conflicts.push({
+        type: 'customer_partial_conflict', customerId: custId, customerName: live.name,
+        addrConflicts, custChanges, addedAddresses, modifiedAddresses, deletedAddresses,
+      });
+    } else if (anyChange) {
+      result.customerChanges.push({ customerId: custId, customerName: live.name, custChanges, addedAddresses, modifiedAddresses, deletedAddresses });
+    }
+  });
+
+  const allMetaCustIds = new Set(metaRows.map(m => m.고객사ID));
+  allMetaCustIds.forEach(custId => {
+    if (remainingCustIds.has(custId)) return;
+    if (!liveById.has(custId)) return;
+    const live = liveById.get(custId);
+    result.deletedCustomers.push({ customerId: custId, customerName: live.name });
+  });
+
+  return result;
+}
+
+async function exportCustomerDataForEdit() {
+  try {
+    const wb = new ExcelJS.Workbook();
+
+    const infoSheet = wb.addWorksheet('안내');
+    infoSheet.columns = [{ width: 90 }];
+    const infoLines = [
+      '■ 고객사데이터(수정용) 내보내기 안내',
+      '',
+      '· 이 파일은 "재가져오기(수정용)"으로만 다시 불러올 수 있습니다(일반 "엑셀 가져오기"와 다른 파일입니다).',
+      '· 숨겨진 열(고객사ID/주소ID/체크섬)은 지우거나 값을 바꾸지 마세요 — 어떤 데이터인지 알아보는 용도입니다.',
+      '· 행을 지우면 "삭제 예정"으로, 새 행을 추가하면 "추가 예정"으로 미리보기에 나타납니다. 실제 반영 전에 항상 확인할 수 있습니다.',
+      '· 값만 바꾸면 "수정 예정"으로 나타납니다. 완전히 같은 값이면 미리보기에 나타나지 않습니다.',
+      `· 내보낸 시각: ${new Date().toLocaleString('ko-KR')}`,
+    ];
+    infoLines.forEach((line, i) => {
+      const cell = infoSheet.getCell(i + 1, 1);
+      cell.value = line;
+      if (i === 0) cell.font = { bold: true, size: 13 };
+    });
+
+    const ws = wb.addWorksheet('고객사데이터');
+    const headers = ['고객사명', '소유자', '분류', '메모', '주소구분', '주소', '상세주소', '담당자명', '담당자 전화번호', '_고객사ID', '_주소ID', '_체크섬'];
+    ws.columns = headers.map(h => ({ header: h, key: h, width: (h === '메모' || h === '주소') ? 28 : 14 }));
+    ws.getRow(1).font = { bold: true };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E9F2' } };
+    ['_고객사ID', '_주소ID', '_체크섬'].forEach(h => { ws.getColumn(headers.indexOf(h) + 1).hidden = true; });
+
+    const { rowsOut, metaRows } = buildExportRows(customers, categories);
+    rowsOut.forEach(r => ws.addRow(r));
+
+    // 숨김 메타 시트(veryHidden - 엑셀 UI에서 우클릭으로도 숨김 해제 안 됨): 내보내기 시점
+    // 전체 (고객사ID, 주소ID) 스냅샷. 재가져오기 시 "삭제 후보" 판단 기준이 됨(동시편집 대응).
+    const metaSheet = wb.addWorksheet('_메타');
+    metaSheet.state = 'veryHidden';
+    metaSheet.columns = [{ header: '고객사ID', key: '고객사ID' }, { header: '주소ID', key: '주소ID' }];
+    metaRows.forEach(r => metaSheet.addRow(r));
+
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `고객사데이터_수정용_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast(`내보내기 완료 (${customers.length}개 고객사) — 수정 후 "재가져오기(수정용)"으로 불러오세요`);
+  } catch (err) {
+    console.error('export for edit error', err);
+    showToast('내보내기 중 오류가 발생했습니다');
+  }
+}
+
+async function handleReimportFile(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  e.target.value = '';
+
+  closeAllSheets();
+  setTimeout(() => openSheet('reimport-sheet'), 150);
+  document.getElementById('reimport-body').innerHTML = '<div class="empty-state"><div>🔄</div>파일 읽는 중...</div>';
+
+  const reader = new FileReader();
+  reader.onload = async (ev) => {
+    try {
+      const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: false });
+      const mainSheetName = wb.SheetNames.find(n => n.includes('고객사')) || wb.SheetNames[0];
+      const mainRows = XLSX.utils.sheet_to_json(wb.Sheets[mainSheetName], { defval: '' });
+
+      const metaSheet = wb.Sheets['_메타'];
+      if (!metaSheet) {
+        document.getElementById('reimport-body').innerHTML =
+          '<div class="empty-state"><div>⚠️</div>이 파일은 "재가져오기(수정용)" 형식이 아닙니다<br>' +
+          '<small style="margin-top:6px;display:block;color:var(--text2);">"고객사 데이터 내보내기(수정용)"로 받은 파일만 재가져오기 할 수 있습니다.</small></div>';
+        return;
+      }
+      const metaRows = XLSX.utils.sheet_to_json(metaSheet, { defval: '' });
+
+      if (mainRows.length === 0) {
+        document.getElementById('reimport-body').innerHTML = '<div class="empty-state"><div>📭</div>읽을 데이터가 없습니다</div>';
+        return;
+      }
+
+      const diff = computeReimportDiff(mainRows, metaRows, customers, categories);
+      window._reimportState = { mainRows, metaRows };
+      renderReimportPreview(diff);
+    } catch (err) {
+      console.error('reimport parse error', err);
+      document.getElementById('reimport-body').innerHTML =
+        `<div class="empty-state"><div>⚠️</div>파일을 읽을 수 없습니다<br><small style="margin-top:6px;display:block;color:var(--text2);">${err.message}</small></div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// 미리보기 체크박스와 반영 시 재검증(freshDiff) 양쪽에서 항목을 같은 방식으로 식별하기 위한
+// 공용 키 생성 함수 - 신규(추가)는 아직 실제 ID가 없어 이름 기준, 나머지는 고객사ID 기준.
+function _reimportItemKey(kind, item) {
+  if (kind === 'added') return 'name:' + item.name;
+  if (kind === 'changed' || kind === 'deleted') return item.customerId;
+  if (kind === 'conflict') return item.customerId || ('name:' + item.customerName);
+  return '';
+}
+
+function _fmtChanges(changes) {
+  const labels = { name: '고객사명', owner: '소유자', category: '분류', memo: '메모', label: '주소구분', address: '주소', detail: '상세주소', contactName: '담당자명', contactPhone: '담당자 전화번호' };
+  return Object.keys(changes).map(k => `${labels[k] || k}: ${changes[k].old || '(비어있음)'} → ${changes[k].new || '(비어있음)'}`).join('<br>');
+}
+
+function renderReimportPreview(diff) {
+  const groups = [];
+
+  if (diff.warnings.length > 0) {
+    groups.push(`<div class="section-divider">⚠️ 참고</div>` +
+      diff.warnings.map(w => `<div style="font-size:12px;color:var(--text2);padding:4px 0;">${w}</div>`).join(''));
+  }
+
+  if (diff.addedCustomers.length > 0) {
+    let html = `<div class="section-divider">➕ 추가 예정 (${diff.addedCustomers.length}건)</div>`;
+    diff.addedCustomers.forEach(c => {
+      const key = encodeURIComponent(_reimportItemKey('added', c));
+      html += `<label class="contact-row" style="cursor:pointer;">
+        <input type="checkbox" class="reimport-check" data-kind="added" data-key="${key}" checked style="margin-right:8px;">
+        <div><div style="font-weight:600;font-size:13px;">${c.name}</div>
+        <div style="font-size:12px;color:var(--text2);">주소 ${c.addresses.length}건 · 소유자: ${c.owner || '(비어있음)'}</div></div>
+      </label>`;
+    });
+    groups.push(html);
+  }
+
+  if (diff.customerChanges.length > 0) {
+    let html = `<div class="section-divider">✏️ 수정 예정 (${diff.customerChanges.length}건)</div>`;
+    diff.customerChanges.forEach(c => {
+      const parts = [];
+      if (Object.keys(c.custChanges).length) parts.push(_fmtChanges(c.custChanges));
+      c.addedAddresses.forEach(a => parts.push(`(신규 주소) ${a.label ? a.label + ': ' : ''}${a.address}`));
+      c.modifiedAddresses.forEach(a => parts.push(_fmtChanges(a.changes)));
+      c.deletedAddresses.forEach(a => parts.push(`(주소 삭제) ${a.label}`));
+      const key = encodeURIComponent(_reimportItemKey('changed', c));
+      html += `<label class="contact-row" style="cursor:pointer; align-items:flex-start;">
+        <input type="checkbox" class="reimport-check" data-kind="changed" data-key="${key}" checked style="margin-right:8px;margin-top:2px;">
+        <div><div style="font-weight:600;font-size:13px;">${c.customerName}</div>
+        <div style="font-size:12px;color:var(--text2);">${parts.join('<br>')}</div></div>
+      </label>`;
+    });
+    groups.push(html);
+  }
+
+  if (diff.deletedCustomers.length > 0) {
+    let html = `<div class="section-divider">🗑️ 삭제 예정 (${diff.deletedCustomers.length}건) — 확인 후 체크해야 반영됩니다</div>`;
+    diff.deletedCustomers.forEach(c => {
+      const key = encodeURIComponent(_reimportItemKey('deleted', c));
+      html += `<label class="contact-row" style="cursor:pointer;">
+        <input type="checkbox" class="reimport-check" data-kind="deleted" data-key="${key}" style="margin-right:8px;">
+        <div><div style="font-weight:600;font-size:13px;">${c.customerName}</div>
+        <div style="font-size:12px;color:var(--text2);">파일에서 빠짐 → 휴지통으로 이동됩니다(복원 가능)</div></div>
+      </label>`;
+    });
+    groups.push(html);
+  }
+
+  if (diff.conflicts.length > 0) {
+    let html = `<div class="section-divider">⚠️ 충돌 — 내보내기 이후 다른 곳에서 변경됨 (${diff.conflicts.length}건)</div>
+      <div style="font-size:12px;color:var(--text2);margin-bottom:6px;">체크하면 지금 라이브 값을 무시하고 재가져오기 파일 내용으로 덮어씁니다. 체크하지 않으면 그대로 두고 넘어갑니다.</div>`;
+    diff.conflicts.forEach(c => {
+      let detail = c.reason || '';
+      if (c.addrConflicts) detail = c.addrConflicts.map(a => a.reason).join('<br>');
+      const key = encodeURIComponent(_reimportItemKey('conflict', c));
+      html += `<label class="contact-row" style="cursor:pointer; align-items:flex-start; background:#FFFBEA;">
+        <input type="checkbox" class="reimport-check" data-kind="conflict" data-key="${key}" style="margin-right:8px;margin-top:2px;">
+        <div><div style="font-weight:600;font-size:13px;">${c.customerName}</div>
+        <div style="font-size:12px;color:var(--text2);">${detail}</div></div>
+      </label>`;
+    });
+    groups.push(html);
+  }
+
+  if (diff.addedCustomers.length === 0 && diff.customerChanges.length === 0 && diff.deletedCustomers.length === 0 && diff.conflicts.length === 0) {
+    groups.push(`<div class="empty-state"><div>✅</div>변경할 내용이 없습니다<br><small style="margin-top:6px;display:block;color:var(--text2);">라이브 데이터와 완전히 동일합니다.</small></div>`);
+  }
+
+  const footer = `<div style="display:flex; gap:8px; margin-top:16px;">
+    <button class="action-btn secondary" style="flex:1;" onclick="closeAllSheets()">취소</button>
+    <button class="submit-btn" style="flex:1;" onclick="applyReimportChanges()">선택한 항목 반영</button>
+  </div>`;
+
+  document.getElementById('reimport-body').innerHTML = groups.join('') + footer;
+}
+
+async function applyReimportChanges() {
+  const state = window._reimportState;
+  if (!state) return;
+
+  const checks = Array.from(document.querySelectorAll('.reimport-check'));
+  const checkedKeys = { added: new Set(), changed: new Set(), deleted: new Set(), conflict: new Set() };
+  checks.forEach(chk => { if (chk.checked) checkedKeys[chk.dataset.kind].add(decodeURIComponent(chk.dataset.key)); });
+
+  const totalChecked = checkedKeys.added.size + checkedKeys.changed.size + checkedKeys.deleted.size + checkedKeys.conflict.size;
+  if (totalChecked === 0) { showToast('선택된 항목이 없습니다'); return; }
+
+  document.getElementById('reimport-body').innerHTML = '<div class="empty-state"><div>🔄</div>최신 데이터 재확인 중...</div>';
+
+  // 반영 직전 라이브 데이터를 다시 가져와 재검증 - 미리보기를 띄워둔 사이에 생긴 변경까지 감지
+  let freshCustomers = customers;
+  try {
+    const remote = await fetchSheetDataRetry(2);
+    if (remote && remote.customers) freshCustomers = remote.customers;
+  } catch (err) {
+    console.error('reimport re-check fetch error', err);
+  }
+  const freshDiff = computeReimportDiff(state.mainRows, state.metaRows, freshCustomers, categories);
+
+  const skipped = [];
+  let addedCount = 0, addedAddrCount = 0, modifiedCount = 0, deletedAddrCount = 0, deletedCustCount = 0;
+
+  // 신규 고객사 추가
+  for (const c of freshDiff.addedCustomers) {
+    const key = _reimportItemKey('added', c);
+    if (!checkedKeys.added.has(key)) continue;
+    const categoryId = _categoryIdByName(c.categoryName, categories);
+    const owner = (c.owner === '정열' || c.owner === '태일') ? c.owner : (currentUser || '태일');
+    const newAddresses = [];
+    for (const a of c.addresses) {
+      let lat = null, lng = null;
+      if (a.address) {
+        try { const geo = await geocodeAddress(a.address); if (geo) { lat = geo.lat; lng = geo.lng; } } catch (e) { /* 지오코딩 실패해도 주소 자체는 추가 */ }
+      }
+      newAddresses.push({ id: 'addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), label: a.label, address: a.address, detail: a.detail, contactName: a.contactName, contactPhone: a.contactPhone, lat, lng });
+    }
+    const firstAddr = newAddresses.find(a => a.lat);
+    customers.push({
+      id: 'cst_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+      name: c.name, category: categoryId, memo: c.memo, contacts: [], addresses: newAddresses,
+      lat: firstAddr ? firstAddr.lat : null, lng: firstAddr ? firstAddr.lng : null,
+      owner, logs: [], createdAt: new Date().toISOString(),
+    });
+    addedCount++;
+  }
+
+  // 기존 고객사 수정(고객사 필드 + 주소 추가/수정/삭제)
+  for (const c of freshDiff.customerChanges) {
+    const key = _reimportItemKey('changed', c);
+    if (!checkedKeys.changed.has(key)) continue;
+    const target = customers.find(x => x.id === c.customerId);
+    if (!target) { skipped.push(`'${c.customerName}' — 반영 직전 다시 확인한 결과 이미 없어져 건너뜀`); continue; }
+
+    if (c.custChanges.name) target.name = c.custChanges.name.new;
+    if (c.custChanges.owner) target.owner = c.custChanges.owner.new;
+    if (c.custChanges.category) target.category = _categoryIdByName(c.custChanges.category.new, categories);
+    if (c.custChanges.memo) target.memo = c.custChanges.memo.new;
+    if (Object.keys(c.custChanges).length) modifiedCount++;
+
+    for (const a of c.modifiedAddresses) {
+      const addr = (target.addresses || []).find(x => x.id === a.addressId);
+      if (!addr) continue;
+      const addressTextChanged = 'address' in a.changes;
+      Object.keys(a.changes).forEach(f => { addr[f] = a.changes[f].new; });
+      if (addressTextChanged && addr.address) {
+        try { const geo = await geocodeAddress(addr.address); if (geo) { addr.lat = geo.lat; addr.lng = geo.lng; } } catch (e) { /* 실패해도 텍스트는 반영 */ }
+      }
+      modifiedCount++;
+    }
+
+    for (const a of c.addedAddresses) {
+      let lat = null, lng = null;
+      if (a.address) {
+        try { const geo = await geocodeAddress(a.address); if (geo) { lat = geo.lat; lng = geo.lng; } } catch (e) {}
+      }
+      target.addresses.push({ id: 'addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), label: a.label, address: a.address, detail: a.detail, contactName: a.contactName, contactPhone: a.contactPhone, lat, lng });
+      addedAddrCount++;
+    }
+
+    if (c.deletedAddresses.length > 0) {
+      const delIds = new Set(c.deletedAddresses.map(a => a.addressId));
+      target.addresses = (target.addresses || []).filter(a => !delIds.has(a.id));
+      deletedAddrCount += c.deletedAddresses.length;
+    }
+  }
+
+  // 충돌 - 체크된 것만 "지금 값을 무시하고 덮어쓰기"로 처리(체크 안 하면 그대로 둠)
+  for (const c of freshDiff.conflicts) {
+    const key = _reimportItemKey('conflict', c);
+    if (!checkedKeys.conflict.has(key)) continue;
+    if (c.type === 'customer_missing_in_live') {
+      skipped.push(`'${c.customerName}' — 이미 다른 곳에서 삭제되어 덮어쓸 대상이 없음`);
+      continue;
+    }
+    const target = customers.find(x => x.id === c.customerId);
+    if (!target) { skipped.push(`'${c.customerName}' — 반영 직전 다시 확인한 결과 이미 없어져 건너뜀`); continue; }
+    if (c.custChanges.name) target.name = c.custChanges.name.new;
+    if (c.custChanges.owner) target.owner = c.custChanges.owner.new;
+    if (c.custChanges.category) target.category = _categoryIdByName(c.custChanges.category.new, categories);
+    if (c.custChanges.memo) target.memo = c.custChanges.memo.new;
+    for (const a of c.modifiedAddresses) {
+      const addr = (target.addresses || []).find(x => x.id === a.addressId);
+      if (!addr) continue;
+      const addressTextChanged = 'address' in a.changes;
+      Object.keys(a.changes).forEach(f => { addr[f] = a.changes[f].new; });
+      if (addressTextChanged && addr.address) {
+        try { const geo = await geocodeAddress(addr.address); if (geo) { addr.lat = geo.lat; addr.lng = geo.lng; } } catch (e) {}
+      }
+    }
+    for (const a of c.addedAddresses) {
+      let lat = null, lng = null;
+      if (a.address) { try { const geo = await geocodeAddress(a.address); if (geo) { lat = geo.lat; lng = geo.lng; } } catch (e) {} }
+      target.addresses.push({ id: 'addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), label: a.label, address: a.address, detail: a.detail, contactName: a.contactName, contactPhone: a.contactPhone, lat, lng });
+    }
+    if (c.deletedAddresses.length > 0) {
+      const delIds = new Set(c.deletedAddresses.map(a => a.addressId));
+      target.addresses = (target.addresses || []).filter(a => !delIds.has(a.id));
+    }
+    modifiedCount++;
+  }
+
+  // 고객사 전체 삭제 - 기존 deleteCustomer()와 동일한 소프트 삭제(tombstone + 휴지통), 확인창은 이미 미리보기가 대신함
+  for (const c of freshDiff.deletedCustomers) {
+    const key = _reimportItemKey('deleted', c);
+    if (!checkedKeys.deleted.has(key)) continue;
+    const target = customers.find(x => x.id === c.customerId);
+    if (!target) continue;
+    markDeleted(c.customerId);
+    customers = customers.filter(x => x.id !== c.customerId);
+    trash.unshift({ ...target, deletedAt: new Date().toISOString() });
+    if (trash.length > 200) trash = trash.slice(0, 200);
+    deletedCustCount++;
+  }
+
+  renderAllMarkers();
+  renderListBody();
+  await saveData();
+
+  let summary = `<div class="empty-state"><div>✅</div>반영 완료<br><small style="margin-top:6px;display:block;color:var(--text2);">`
+    + `추가 ${addedCount}건 · 주소추가 ${addedAddrCount}건 · 수정 ${modifiedCount}건 · 주소삭제 ${deletedAddrCount}건 · 고객사삭제 ${deletedCustCount}건`
+    + `</small></div>`;
+  if (skipped.length > 0) {
+    summary += `<div class="section-divider">⚠️ 반영에서 제외됨</div>`;
+    skipped.forEach(s => { summary += `<div style="font-size:12px;color:var(--text2);padding:4px 0;">${s}</div>`; });
+  }
+  summary += `<button class="submit-btn" onclick="closeAllSheets()" style="margin-top:16px;">확인</button>`;
+  document.getElementById('reimport-body').innerHTML = summary;
+  showToast('재가져오기 반영 완료');
 }
 
 // ==================== DRAG SCROLL (마우스로 가로 스크롤) ====================

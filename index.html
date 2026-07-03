@@ -994,7 +994,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.05</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.06</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -4051,18 +4051,21 @@ function enableDragScroll(el) {
     isDown = true; moved = false;
     startX = e.pageX;
     startScroll = el.scrollLeft;
+    el.style.userSelect = 'none';
   });
   const stop = () => {
     isDown = false;
     el.dataset.dragMoved = moved ? '1' : '';
+    el.style.userSelect = '';
   };
   el.addEventListener('mouseleave', stop);
   document.addEventListener('mouseup', stop);
   el.addEventListener('mousemove', (e) => {
     if (!isDown) return;
+    e.preventDefault();
     const walk = e.pageX - startX;
     if (Math.abs(walk) > 4) moved = true;
-    if (moved) { e.preventDefault(); el.scrollLeft = startScroll - walk; }
+    if (moved) el.scrollLeft = startScroll - walk;
   });
   el.addEventListener('click', (e) => {
     if (moved) { e.stopPropagation(); e.preventDefault(); }

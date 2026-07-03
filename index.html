@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.08</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.09</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1182,10 +1182,31 @@
   <div style="font-weight:700; font-size:14px; margin-bottom:10px;">폴더로 이동</div>
   <div id="folder-picker-list"></div>
   <div style="display:flex; gap:6px; margin-top:10px;">
-    <input type="text" class="form-input" id="folder-picker-new-name" placeholder="새 폴더 이름" style="flex:1; font-size:13px;">
-    <button class="add-entry-btn" style="margin-top:0; padding:8px 10px;" onclick="createManualFolderFromPicker()">추가</button>
+    <input type="text" class="form-input" id="folder-picker-new-name" placeholder="새 폴더 이름" style="flex:1; min-width:0; font-size:13px;">
+    <button class="add-entry-btn" style="width:auto; flex-shrink:0; margin-top:0; padding:8px 14px; white-space:nowrap;" onclick="createManualFolderFromPicker()">추가</button>
   </div>
   <button class="action-btn secondary" style="width:100%; margin-top:10px; padding:8px;" onclick="closeFolderPicker()">닫기</button>
+</div>
+
+<!-- FOLDER CONTEXT MENU (길게 눌렀을 때) -->
+<div id="folder-context-menu-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:620;" onclick="closeFolderContextMenu()"></div>
+<div id="folder-context-menu-popup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:621; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; width:240px; max-width:calc(100vw - 40px);">
+  <div id="folder-context-menu-title" style="font-weight:700; font-size:14px; margin-bottom:12px; text-align:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
+  <button class="action-btn secondary" style="width:100%; margin-bottom:8px; padding:10px;" onclick="openFolderRenamePopup()">✏️ 이름 수정</button>
+  <button class="action-btn secondary" style="width:100%; margin-bottom:8px; padding:10px;" onclick="dissolveManualFolderFromMenu()">📤 해체 (고객사는 남김)</button>
+  <button class="action-btn danger" style="width:100%; margin-bottom:8px; padding:10px;" onclick="deleteManualFolderWithMembers()">🗑️ 삭제 (고객사까지 삭제)</button>
+  <button class="action-btn secondary" style="width:100%; padding:10px;" onclick="closeFolderContextMenu()">취소</button>
+</div>
+
+<!-- FOLDER RENAME POPUP -->
+<div id="folder-rename-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:620;" onclick="closeFolderRenamePopup()"></div>
+<div id="folder-rename-popup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:621; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; width:260px; max-width:calc(100vw - 40px);">
+  <div style="font-weight:700; font-size:14px; margin-bottom:10px;">폴더 이름 수정</div>
+  <input type="text" class="form-input" id="folder-rename-input" style="width:100%; font-size:13px;">
+  <div style="display:flex; gap:8px; margin-top:12px;">
+    <button class="action-btn secondary" style="flex:1; padding:10px;" onclick="closeFolderRenamePopup()">취소</button>
+    <button class="action-btn" style="flex:1; padding:10px;" onclick="confirmFolderRename()">저장</button>
+  </div>
 </div>
 
 <!-- EXIT CONFIRM POPUP (뒤로가기) -->
@@ -3101,7 +3122,7 @@ function renderListBody() {
       const folderKey = 'mfolder_' + f.id;
       const isOpen = listFolderState[folderKey] || false;
       html += `<div style="border-bottom:1px solid var(--border);">
-        <div class="contact-row" style="cursor:pointer; background:var(--surface2);">
+        <div class="contact-row manual-folder-header" data-folder-id="${f.id}" style="cursor:pointer; background:var(--surface2);">
           <div style="flex:1; min-width:0; display:flex; align-items:center; gap:6px;" onclick="toggleListFolder('${folderKey}')">
             <span style="font-size:14px;">${isOpen ? '📂' : '📁'}</span>
             <span style="font-weight:700;font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${f.name}</span>
@@ -3162,6 +3183,7 @@ function renderListBody() {
 
   body.innerHTML = html;
   attachListRowHandlers();
+  setupManualFolderLongPress();
 }
 
 // ==================== 길게 눌러 드래그로 순서 변경 (재사용 가능) ====================
@@ -3245,6 +3267,135 @@ function setupDragReorder(containerId, rowSelector, getArray, onCommit) {
 function toggleListFolder(key) {
   listFolderState[key] = !listFolderState[key];
   renderListBody();
+}
+
+// ==================== 수동 폴더 길게 누르기 → 이름수정/해체/삭제 메뉴 ====================
+let folderLongPressJustFired = false;
+
+function setupManualFolderLongPress() {
+  const container = document.getElementById('list-body');
+  if (!container || container.dataset.folderLongPressReady) return;
+  container.dataset.folderLongPressReady = '1';
+  let timer = null, startX = 0, startY = 0;
+
+  function start(x, y, el) {
+    const folderId = el.dataset.folderId;
+    timer = setTimeout(() => {
+      timer = null;
+      folderLongPressJustFired = true;
+      openFolderContextMenu(folderId);
+      if (navigator.vibrate) navigator.vibrate(30);
+    }, 500);
+  }
+  function cancel() { if (timer) { clearTimeout(timer); timer = null; } }
+
+  container.addEventListener('touchstart', e => {
+    const el = e.target.closest('.manual-folder-header');
+    if (!el) return;
+    const t = e.touches[0];
+    startX = t.clientX; startY = t.clientY;
+    start(t.clientX, t.clientY, el);
+  }, { passive: true });
+  container.addEventListener('touchmove', e => {
+    if (!timer) return;
+    const t = e.touches[0];
+    if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) cancel();
+  }, { passive: true });
+  container.addEventListener('touchend', cancel);
+  container.addEventListener('touchcancel', cancel);
+
+  container.addEventListener('mousedown', e => {
+    const el = e.target.closest('.manual-folder-header');
+    if (!el) return;
+    startX = e.clientX; startY = e.clientY;
+    start(e.clientX, e.clientY, el);
+  });
+  container.addEventListener('mousemove', e => {
+    if (!timer) return;
+    if (Math.abs(e.clientX - startX) > 10 || Math.abs(e.clientY - startY) > 10) cancel();
+  });
+  container.addEventListener('mouseup', cancel);
+  container.addEventListener('mouseleave', cancel);
+
+  // 롱프레스로 메뉴가 뜬 직후에는, 뒤이어 발생하는 click(토글)을 한 번 무시한다
+  container.addEventListener('click', e => {
+    if (folderLongPressJustFired && e.target.closest('.manual-folder-header')) {
+      folderLongPressJustFired = false;
+      e.stopPropagation();
+      e.preventDefault();
+    }
+  }, true);
+}
+
+let contextMenuFolderId = null;
+
+function openFolderContextMenu(folderId) {
+  contextMenuFolderId = folderId;
+  const f = manualFolders.find(x => x.id === folderId);
+  if (!f) return;
+  document.getElementById('folder-context-menu-title').textContent = f.name;
+  document.getElementById('folder-context-menu-backdrop').style.display = 'block';
+  document.getElementById('folder-context-menu-popup').style.display = 'block';
+  pushNavGuard();
+}
+
+function closeFolderContextMenu() {
+  document.getElementById('folder-context-menu-backdrop').style.display = 'none';
+  document.getElementById('folder-context-menu-popup').style.display = 'none';
+}
+
+function openFolderRenamePopup() {
+  const f = manualFolders.find(x => x.id === contextMenuFolderId);
+  if (!f) return;
+  closeFolderContextMenu();
+  document.getElementById('folder-rename-input').value = f.name;
+  document.getElementById('folder-rename-backdrop').style.display = 'block';
+  document.getElementById('folder-rename-popup').style.display = 'block';
+  pushNavGuard();
+}
+
+function closeFolderRenamePopup() {
+  document.getElementById('folder-rename-backdrop').style.display = 'none';
+  document.getElementById('folder-rename-popup').style.display = 'none';
+}
+
+function confirmFolderRename() {
+  const name = (document.getElementById('folder-rename-input').value || '').trim();
+  if (!name) { showToast('폴더 이름을 입력해주세요'); return; }
+  const f = manualFolders.find(x => x.id === contextMenuFolderId);
+  if (f) f.name = name;
+  closeFolderRenamePopup();
+  saveData();
+  renderListBody();
+  showToast('폴더 이름을 바꿨습니다');
+}
+
+function dissolveManualFolderFromMenu() {
+  const folderId = contextMenuFolderId;
+  closeFolderContextMenu();
+  dissolveManualFolder(folderId);
+}
+
+async function deleteManualFolderWithMembers() {
+  const folderId = contextMenuFolderId;
+  const f = manualFolders.find(x => x.id === folderId);
+  if (!f) return;
+  const members = customers.filter(c => c.manualFolderId === folderId);
+  closeFolderContextMenu();
+  if (!confirm(`"${f.name}" 폴더와 안에 있는 고객사 ${members.length}개를 모두 삭제할까요?\n(휴지통에서 복원 가능)`)) return;
+
+  const ids = members.map(c => c.id);
+  if (ids.length > 0) markManyDeleted(ids);
+  customers = customers.filter(c => c.manualFolderId !== folderId);
+  const now = new Date().toISOString();
+  members.forEach(m => trash.unshift({ ...m, deletedAt: now }));
+  if (trash.length > 200) trash = trash.slice(0, 200);
+
+  manualFolders = manualFolders.filter(x => x.id !== folderId);
+  renderAllMarkers();
+  await saveData();
+  renderListBody();
+  showToast(`폴더와 고객사 ${ids.length}개를 삭제했습니다 (휴지통에서 복원 가능)`);
 }
 
 // ==================== 수동 폴더 (사용자 생성/해체 + 이동) ====================
@@ -3905,6 +4056,8 @@ function isVisible(id) {
 function closeTopmostLayer() {
   // 위에 떠 있는 팝업/오버레이류부터 우선 처리 (표시 순서상 가장 위에 있는 것들)
   if (isVisible('exit-confirm-popup')) { cancelExitApp(); return true; }
+  if (isVisible('folder-rename-popup')) { closeFolderRenamePopup(); return true; }
+  if (isVisible('folder-context-menu-popup')) { closeFolderContextMenu(); return true; }
   if (isVisible('folder-picker-popup')) { closeFolderPicker(); return true; }
   if (isVisible('color-picker')) { document.getElementById('color-picker').classList.remove('open'); return true; }
   if (isVisible('address-search-overlay')) { closeAddressSearch(); return true; }

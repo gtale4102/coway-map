@@ -887,11 +887,7 @@
     </div>
 
 
-    <div class="section-divider">담당자</div>
-    <div class="multi-entry" id="f-contacts"></div>
-    <button class="add-entry-btn" onclick="addContactRow()">+ 담당자 추가</button>
-
-    <div class="section-divider" style="margin-top:16px;">주소 / 지점</div>
+    <div class="section-divider">주소 / 지점 / 담당자</div>
     <div id="f-addresses"></div>
     <button class="add-entry-btn" onclick="addAddressRow()">+ 주소 추가</button>
 
@@ -987,7 +983,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v4.02</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.00</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1276,6 +1272,7 @@ let detailSheetOrigin = null; // 'list' | null - 상세화면 진입 경로 추�
 let detailSelectedAddrId = null; // 상세화면에서 현재 선택된 주소 (null = 전체보기)
 let listSelectMode = false;
 let selectedListIds = new Set();
+let listFolderState = {}; // 폴더 펼침/접힘 상태 { folderKey: true/false }
 let mapSearchQuery = '';
 let selectedLogType = null;
 let currentColorTarget = null;
@@ -1299,6 +1296,35 @@ function ensureAddressIds() {
   return changed;
 }
 
+// v5.00 마이그레이션: 기존 contacts[] → 주소 블록 contactName/contactPhone으로 이전
+// - addressId가 있는 담당자 → 해당 주소로 이동
+// - addressId 없는 담당자(공용) → 첫 번째 주소로 이동
+function migrateContactsToAddresses() {
+  let changed = false;
+  customers.forEach(c => {
+    if (!c.contacts || c.contacts.length === 0) return;
+    // 이미 마이그레이션된 고객사는 건너뜀 (주소에 contactName이 하나라도 있으면)
+    const alreadyMigrated = (c.addresses || []).some(a => a.contactName);
+    if (alreadyMigrated) { c.contacts = []; changed = true; return; }
+    const addrs = c.addresses || [];
+    c.contacts.forEach(ct => {
+      if (!ct.name && !ct.phone) return;
+      let targetAddr = null;
+      if (ct.addressId) {
+        targetAddr = addrs.find(a => a.id === ct.addressId);
+      }
+      if (!targetAddr) targetAddr = addrs[0]; // 공용 or 못찾으면 첫 번째 주소로
+      if (targetAddr) {
+        if (!targetAddr.contactName) targetAddr.contactName = ct.name || '';
+        if (!targetAddr.contactPhone) targetAddr.contactPhone = ct.phone || '';
+      }
+      changed = true;
+    });
+    c.contacts = []; // 이전 완료 후 비움
+  });
+  return changed;
+}
+
 async function loadData() {
   return new Promise((resolve) => {
     const cbName = 'sheetCallback_' + Date.now();
@@ -1313,6 +1339,7 @@ async function loadData() {
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       trash = JSON.parse(localStorage.getItem(TRASH_KEY) || '[]');
       ensureAddressIds();
+      migrateContactsToAddresses();
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
     }, 8000);
@@ -1327,6 +1354,7 @@ async function loadData() {
       routeHistory = data.routeHistory || [];
       trash = data.trash || [];
       ensureAddressIds();
+      migrateContactsToAddresses();
       // 로컬 백업
       localStorage.setItem(STORAGE_KEY, JSON.stringify(customers));
       localStorage.setItem(CAT_KEY, JSON.stringify(categories));
@@ -1345,6 +1373,7 @@ async function loadData() {
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       trash = JSON.parse(localStorage.getItem(TRASH_KEY) || '[]');
       ensureAddressIds();
+      migrateContactsToAddresses();
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
       resolve();
     };
@@ -2410,27 +2439,10 @@ function openDetail(id, origin, addressId, keepSelection) {
   // 필터 적용 - 주소가 1개뿐이면 필터링 의미가 없으므로 항상 전체를 보여준다
   const allLogs = c.logs || [];
   const logs = hasMultipleAddrs ? allLogs.filter(l => belongsToAddrFilter(l, c, filterAddrId)) : allLogs;
-  const allContacts = c.contacts || [];
-  const contacts = hasMultipleAddrs ? allContacts.filter(ct => belongsToAddrFilter(ct, c, filterAddrId)) : allContacts;
-
   // last contacts
   const lastVisit = logs.filter(l => l.type === 'visit').sort((a,b) => b.date.localeCompare(a.date))[0];
   const lastCall = logs.filter(l => l.type === 'call').sort((a,b) => b.date.localeCompare(a.date))[0];
   const lastSms = logs.filter(l => l.type === 'sms').sort((a,b) => b.date.localeCompare(a.date))[0];
-
-  // contacts html
-  let contactsHtml = '';
-  contacts.forEach(ct => {
-    const tel = ct.phone ? ct.phone.replace(/-/g,'') : '';
-    contactsHtml += `
-      <div class="contact-row">
-        <div>
-          <div class="contact-name">${ct.name || '담당자'}</div>
-          <div class="contact-phone">${ct.phone || ''}</div>
-        </div>
-        ${tel ? `<button class="contact-call-btn" onclick="callTel('${tel}')">📞 전화</button>` : ''}
-      </div>`;
-  });
 
   // addresses html - 2개 이상이면 선택(필터)/분리 가능한 탭으로, 아니면 기존처럼 단순 표시
   let addrHtml = '';
@@ -2441,14 +2453,22 @@ function openDetail(id, origin, addressId, keepSelection) {
   }
   (c.addresses || []).forEach(a => {
     const isSelected = hasMultipleAddrs && filterAddrId === a.id;
-    addrHtml += `<div class="contact-row" style="cursor:${hasMultipleAddrs ? 'pointer' : 'default'}; ${isSelected ? `border:1px solid ${color};` : ''}" ${hasMultipleAddrs ? `onclick="selectDetailAddress('${a.id}')"` : ''}>
-      <div>
-        ${a.label ? `<div style="font-size:11px;color:var(--text2);margin-bottom:2px;">${a.label}${isSelected ? ' · 선택됨' : ''}</div>` : ''}
-        <div class="info-value">${a.address}${a.detail ? ' <span style="color:var(--text2);">' + a.detail + '</span>' : ''}</div>
-      </div>
-      <div style="display:flex; gap:4px; flex-shrink:0;">
-        ${hasMultipleAddrs ? `<button class="contact-call-btn" style="color:var(--danger);" onclick="event.stopPropagation(); splitAddress('${id}','${a.id}')">✂️ 분리</button>` : ''}
-        <button class="contact-call-btn" style="color:var(--warning);" onclick="event.stopPropagation(); openKakaoNavi('${a.address}')">🗺️ 길찾기</button>
+    const tel = a.contactPhone ? a.contactPhone.replace(/-/g,'') : '';
+    addrHtml += `<div style="padding:10px; margin-bottom:6px; background:var(--surface2); border-radius:var(--radius-sm); border:1px solid ${isSelected ? color : 'var(--border)'}; cursor:${hasMultipleAddrs ? 'pointer' : 'default'};" ${hasMultipleAddrs ? `onclick="selectDetailAddress('${a.id}')"` : ''}>
+      <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+        <div style="flex:1;">
+          ${a.label ? `<div style="font-size:11px;color:var(--text2);font-weight:600;margin-bottom:3px;">${a.label}${isSelected ? ' ✓' : ''}</div>` : ''}
+          <div style="font-size:13px;">${a.address}${a.detail ? ' <span style="color:var(--text2);">' + a.detail + '</span>' : ''}</div>
+          ${(a.contactName || a.contactPhone) ? `<div style="margin-top:6px; display:flex; align-items:center; gap:8px;">
+            <span style="font-size:13px; font-weight:600;">${a.contactName || ''}</span>
+            <span style="font-size:12px; color:var(--text2);">${a.contactPhone || ''}</span>
+            ${tel ? `<button class="contact-call-btn" onclick="event.stopPropagation(); callTel('${tel}')">📞 전화</button>` : ''}
+          </div>` : ''}
+        </div>
+        <div style="display:flex; gap:4px; flex-shrink:0; margin-left:8px;">
+          ${hasMultipleAddrs ? `<button class="contact-call-btn" style="color:var(--danger);" onclick="event.stopPropagation(); splitAddress('${id}','${a.id}')">✂️ 분리</button>` : ''}
+          <button class="contact-call-btn" style="color:var(--warning);" onclick="event.stopPropagation(); openKakaoNavi('${a.address}')">🗺️ 길찾기</button>
+        </div>
       </div>
     </div>`;
   });
@@ -2490,10 +2510,8 @@ function openDetail(id, origin, addressId, keepSelection) {
 
     ${(c.addresses || []).length > 0 ? `<div class="info-section"><div class="info-label">주소 / 지점</div>${addrHtml}</div>` : ''}
 
-    ${contactsHtml ? `<div class="info-section"><div class="info-label">담당자${hasMultipleAddrs && filterAddrId ? ' (이 주소 + 공용)' : ''}</div>${contactsHtml}</div>` : ''}
-
     <div class="info-section">
-      <div class="info-label">컨택 이력${hasMultipleAddrs && filterAddrId ? ' (이 주소 + 공용)' : ''}</div>
+      <div class="info-label">컨택 이력${hasMultipleAddrs && filterAddrId ? ' (이 주소)' : ''}</div>
       ${logsHtml}
     </div>
 
@@ -2585,10 +2603,7 @@ function openAddSheet() {
   document.getElementById('f-name').value = '';
   document.getElementById('f-memo').value = '';
   populateCategorySelect();
-  document.getElementById('f-contacts').innerHTML = '';
   document.getElementById('f-addresses').innerHTML = '';
-
-  addContactRow();
   addAddressRow();
   openSheet('form-sheet');
 }
@@ -2602,10 +2617,6 @@ function openEditSheet(id) {
   document.getElementById('f-memo').value = c.memo || '';
   populateCategorySelect(c.category);
 
-
-  document.getElementById('f-contacts').innerHTML = '';
-  (c.contacts || []).forEach(ct => addContactRow(ct));
-  if (!c.contacts || c.contacts.length === 0) addContactRow();
 
   document.getElementById('f-addresses').innerHTML = '';
   (c.addresses || []).forEach(a => addAddressRow(a));
@@ -2664,22 +2675,23 @@ function refreshContactAddressOptions() {
 function addAddressRow(a = {}) {
   const wrap = document.createElement('div');
   wrap.className = 'addr-wrap';
-  wrap.style.marginBottom = '8px';
-  // 폼에 추가되는 즉시 id를 부여한다 (기존 주소면 그대로 유지) - 그래야 같은 화면 안에서
-  // 담당자 연락처가 "이 주소 담당"으로 바로 연결될 수 있다.
+  wrap.style.cssText = 'margin-bottom:12px; padding:10px; background:var(--surface2); border-radius:var(--radius-sm); border:1px solid var(--border);';
   wrap.dataset.addrId = a.id || ('addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7));
   wrap.innerHTML = `
-    <div class="address-row">
-      <input type="text" class="form-input addr-label" placeholder="구분(본사/지점)" value="${a.label || ''}" style="max-width:90px;">
-      <input type="text" class="form-input addr-addr" placeholder="주소 검색을 눌러주세요" value="${a.address || ''}" readonly style="cursor:pointer;" onclick="openAddressSearch(this)">
-      <button class="remove-btn" onclick="this.closest('.addr-wrap').remove(); refreshContactAddressOptions();">−</button>
+    <div style="display:flex; gap:6px; align-items:center; margin-bottom:6px;">
+      <input type="text" class="form-input addr-label" placeholder="구분(본사/지점 등)" value="${a.label || ''}" style="max-width:100px;">
+      <input type="text" class="form-input addr-addr" placeholder="주소 검색을 눌러주세요" value="${a.address || ''}" readonly style="cursor:pointer; flex:1;" onclick="openAddressSearch(this)">
+      <button class="remove-btn" onclick="this.closest('.addr-wrap').remove();">−</button>
     </div>
-    <div style="display:flex; gap:6px; margin-top:4px;">
+    <div style="display:flex; gap:6px; margin-bottom:6px;">
       <button class="add-entry-btn" style="flex:1; margin-top:0; padding:6px;" onclick="openAddressSearch(this.closest('.addr-wrap').querySelector('.addr-addr'))">🔍 주소 검색</button>
       <input type="text" class="form-input addr-detail" placeholder="상세주소(동/호수 등)" value="${a.detail || ''}" style="flex:1.5;">
+    </div>
+    <div style="display:flex; gap:6px;">
+      <input type="text" class="form-input addr-contact-name" placeholder="담당자 이름" value="${a.contactName || ''}" style="flex:1;">
+      <input type="tel" class="form-input addr-contact-phone" placeholder="전화번호" value="${a.contactPhone || ''}" style="flex:1.5;">
     </div>`;
   document.getElementById('f-addresses').appendChild(wrap);
-  refreshContactAddressOptions();
 }
 
 let addressSearchTarget = null;
@@ -2739,22 +2751,18 @@ async function submitForm() {
     const category = document.getElementById('f-category').value;
     const memo = document.getElementById('f-memo').value.trim();
 
-    const contacts = [];
-    document.querySelectorAll('#f-contacts .multi-entry-row').forEach(row => {
-      const n = row.querySelector('.ct-name').value.trim();
-      const p = row.querySelector('.ct-phone').value.trim();
-      const addressId = row.dataset.contactAddrId || null; // 빈 값/없음 = 전체 공용 담당
-      if (n || p) contacts.push({ name: n, phone: p, addressId });
-    });
-
     const addresses = [];
     document.querySelectorAll('#f-addresses .addr-wrap').forEach(wrap => {
       const l = wrap.querySelector('.addr-label').value.trim();
       const a = wrap.querySelector('.addr-addr').value.trim();
       const d = wrap.querySelector('.addr-detail')?.value.trim() || '';
-      const id = wrap.dataset.addrId; // addAddressRow에서 이미 발급됨 (신규/기존 모두)
-      if (a) addresses.push({ id, label: l, address: a, detail: d });
+      const id = wrap.dataset.addrId;
+      const contactName = wrap.querySelector('.addr-contact-name')?.value.trim() || '';
+      const contactPhone = wrap.querySelector('.addr-contact-phone')?.value.trim() || '';
+      if (a) addresses.push({ id, label: l, address: a, detail: d, contactName, contactPhone });
     });
+    // 하위 호환: contacts 배열은 빈 배열로 초기화 (기존 구조 유지하되 폼에서는 더 이상 사용 안 함)
+    const contacts = [];
 
     // 모든 주소 좌표 변환 (실패해도 저장은 계속 진행)
     if (addresses.length > 0) {
@@ -2960,28 +2968,81 @@ function renderListBody() {
     return;
   }
 
-  body.innerHTML = list.map(c => {
-    const color = getCategoryColor(c.category);
-    const catName = getCategoryName(c.category);
-    const logs = c.logs || [];
-    const lastAny = [...logs].sort((a,b) => b.date.localeCompare(a.date))[0];
-    const labels = (c.addresses || []).map(a => a.label).filter(Boolean);
-    const labelText = labels.length > 0 ? ` <span style="color:var(--text2); font-weight:400;">(${labels.join(' · ')})</span>` : '';
-    const isChecked = selectedListIds.has(c.id);
+  // 같은 고객사명끼리 폴더로 묶기
+  const grouped = {};
+  const nameOrder = [];
+  list.forEach(c => {
+    if (!grouped[c.name]) { grouped[c.name] = []; nameOrder.push(c.name); }
+    grouped[c.name].push(c);
+  });
 
-    return `<div class="contact-row list-item-row" data-cid="${c.id}" style="cursor:pointer;">
-      ${listSelectMode ? `<input type="checkbox" class="list-item-checkbox" ${isChecked ? 'checked' : ''} style="width:18px;height:18px;flex-shrink:0;margin-right:6px;" onclick="toggleListSelect('${c.id}'); event.stopPropagation();">` : ''}
-      <div style="flex:1; min-width:0;">
-        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-          <span class="legend-dot" style="background:${color}; width:10px; height:10px; flex-shrink:0;"></span>
-          <span style="font-weight:600;font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.name}${labelText}</span>
+  let html = '';
+  nameOrder.forEach(name => {
+    const group = grouped[name];
+    const allLogs = group.flatMap(c => c.logs || []);
+    const lastAny = [...allLogs].sort((a,b) => b.date.localeCompare(a.date))[0];
+
+    if (group.length === 1) {
+      // 단일 고객사 — 기존 스타일 그대로
+      const c = group[0];
+      const color = getCategoryColor(c.category);
+      const catName = getCategoryName(c.category);
+      const addrs = (c.addresses || []);
+      const addrLabel = addrs.length > 0
+        ? addrs.map(a => a.label || a.address).filter(Boolean).join(' · ')
+        : '';
+      const isChecked = selectedListIds.has(c.id);
+      html += `<div class="contact-row list-item-row" data-cid="${c.id}" style="cursor:pointer;">
+        ${listSelectMode ? `<input type="checkbox" class="list-item-checkbox" ${isChecked ? 'checked' : ''} style="width:18px;height:18px;flex-shrink:0;margin-right:6px;" onclick="toggleListSelect('${c.id}'); event.stopPropagation();">` : ''}
+        <div style="flex:1; min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+            <span class="legend-dot" style="background:${color}; width:10px; height:10px; flex-shrink:0;"></span>
+            <span style="font-weight:600;font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.name}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text2);">${catName}${addrLabel ? ' · ' + addrLabel : ''}${lastAny ? ' · 최근: ' + lastAny.date : ''}</div>
         </div>
-        <div style="font-size:12px;color:var(--text2);">${catName} ${lastAny ? '· 최근 컨택: ' + lastAny.date : ''}</div>
-      </div>
-      ${!listSelectMode ? '<span style="color:var(--text2);font-size:18px;">›</span>' : ''}
-    </div>`;
-  }).join('');
+        ${!listSelectMode ? '<span style="color:var(--text2);font-size:18px;">›</span>' : ''}
+      </div>`;
+    } else {
+      // 동명 다주소 — 폴더로 묶기
+      const folderKey = 'folder_' + encodeURIComponent(name);
+      const isOpen = listFolderState[folderKey] || false;
+      html += `<div style="border-bottom:1px solid var(--border);">
+        <div class="contact-row" style="cursor:pointer;" onclick="toggleListFolder('${folderKey}')">
+          <div style="flex:1; min-width:0;">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+              <span style="font-size:14px;">${isOpen ? '📂' : '📁'}</span>
+              <span style="font-weight:700;font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${name}</span>
+              <span style="font-size:11px; color:var(--text2); flex-shrink:0;">${group.length}개 주소</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2);">${lastAny ? '최근 컨택: ' + lastAny.date : '컨택 이력 없음'}</div>
+          </div>
+          <span style="color:var(--text2);font-size:16px;">${isOpen ? '▴' : '▾'}</span>
+        </div>
+        ${isOpen ? group.map(c => {
+          const color = getCategoryColor(c.category);
+          const catName = getCategoryName(c.category);
+          const addrs = c.addresses || [];
+          const addrLabel = addrs.map(a => a.label || a.address).filter(Boolean).join(' · ');
+          const contactInfo = addrs.length > 0 && addrs[0].contactName ? addrs[0].contactName : '';
+          const isChecked = selectedListIds.has(c.id);
+          return `<div class="contact-row list-item-row" data-cid="${c.id}" style="cursor:pointer; padding-left:28px; background:var(--surface2);">
+            ${listSelectMode ? `<input type="checkbox" class="list-item-checkbox" ${isChecked ? 'checked' : ''} style="width:18px;height:18px;flex-shrink:0;margin-right:6px;" onclick="toggleListSelect('${c.id}'); event.stopPropagation();">` : ''}
+            <div style="flex:1; min-width:0;">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px;">
+                <span class="legend-dot" style="background:${color}; width:8px; height:8px; flex-shrink:0;"></span>
+                <span style="font-weight:600;font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${addrLabel || catName}</span>
+              </div>
+              <div style="font-size:11px;color:var(--text2);">${catName}${contactInfo ? ' · ' + contactInfo : ''}</div>
+            </div>
+            <span style="color:var(--text2);font-size:18px;">›</span>
+          </div>`;
+        }).join('') : ''}
+      </div>`;
+    }
+  });
 
+  body.innerHTML = html;
   attachListRowHandlers();
 }
 
@@ -3061,6 +3122,11 @@ function setupDragReorder(containerId, rowSelector, getArray, onCommit) {
     if (dragging) moveDrag(e.clientY);
   });
   document.addEventListener('mouseup', endDrag);
+}
+
+function toggleListFolder(key) {
+  listFolderState[key] = !listFolderState[key];
+  renderListBody();
 }
 
 function attachListRowHandlers() {
@@ -4833,7 +4899,6 @@ window.addEventListener('resize', () => {
   if (map) {
     kakao.maps.event.trigger(map, 'resize');
   }
-
 });
 
 // 백그라운드에서 돌아올 때 지도 재조정
@@ -4847,6 +4912,3 @@ document.addEventListener('visibilitychange', () => {
 </script>
 </body>
 </html>
-
-
-

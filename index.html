@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.11</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.12</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1287,6 +1287,7 @@ const TRASH_KEY = 'coway_trash_v1';
 const MANUAL_FOLDER_KEY = 'coway_manual_folders_v1';
 const DELETED_IDS_KEY = 'coway_deleted_ids_v1';
 const DELETED_ROUTE_HIST_KEY = 'coway_deleted_route_hist_v1';
+const DELETED_FOLDER_IDS_KEY = 'coway_deleted_folder_ids_v1';
 
 function loadDeletedIds() {
   try { return JSON.parse(localStorage.getItem(DELETED_IDS_KEY) || '[]'); } catch { return []; }
@@ -1311,6 +1312,14 @@ function markRouteHistDeleted(id) {
   const ids = loadDeletedRouteHistIds();
   if (!ids.includes(id)) ids.push(id);
   localStorage.setItem(DELETED_ROUTE_HIST_KEY, JSON.stringify(ids.slice(-100)));
+}
+function loadDeletedFolderIds() {
+  try { return JSON.parse(localStorage.getItem(DELETED_FOLDER_IDS_KEY) || '[]'); } catch { return []; }
+}
+function markFolderDeleted(id) {
+  const ids = loadDeletedFolderIds();
+  if (!ids.includes(id)) ids.push(id);
+  localStorage.setItem(DELETED_FOLDER_IDS_KEY, JSON.stringify(ids.slice(-200)));
 }
 function unmarkDeleted(id) {
   const ids = loadDeletedIds().filter(x => x !== id);
@@ -1532,8 +1541,9 @@ async function mergeAndSaveToSheet() {
       }
       if (remote.manualFolders && remote.manualFolders.length > 0) {
         const localFolderIds = new Set(manualFolders.map(f => f.id));
+        const deletedFolderIds = new Set(loadDeletedFolderIds());
         remote.manualFolders.forEach(rf => {
-          if (!localFolderIds.has(rf.id)) { manualFolders.push(rf); localFolderIds.add(rf.id); }
+          if (!localFolderIds.has(rf.id) && !deletedFolderIds.has(rf.id)) { manualFolders.push(rf); localFolderIds.add(rf.id); }
         });
       }
     }
@@ -3412,6 +3422,7 @@ function deleteManualFolderWithMembers() {
     if (trash.length > 200) trash = trash.slice(0, 200);
 
     manualFolders = manualFolders.filter(x => x.id !== folderId);
+    markFolderDeleted(folderId);
     renderAllMarkers();
     await saveData();
     renderListBody();
@@ -3521,6 +3532,7 @@ function dissolveManualFolder(folderId) {
   showGenericConfirm('이 폴더를 해체할까요? 폴더 안 고객사는 미지정 상태로 남아요.', () => {
     customers.forEach(c => { if (c.manualFolderId === folderId) delete c.manualFolderId; });
     manualFolders = manualFolders.filter(f => f.id !== folderId);
+    markFolderDeleted(folderId);
     saveData();
     renderListBody();
     showToast('폴더를 해체했습니다');

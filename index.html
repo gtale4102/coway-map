@@ -922,6 +922,7 @@
     <span id="list-select-count" style="font-size:13px; font-weight:600; flex:1;">0개 선택됨</span>
     <button class="action-btn secondary" style="padding:6px 12px; font-size:12px;" onclick="exitListSelectMode()">취소</button>
     <button class="action-btn secondary" id="list-merge-btn" style="display:none; padding:6px 12px; font-size:12px;" onclick="openMergeConfirm()">🔗 병합</button>
+    <button class="action-btn secondary" style="padding:6px 12px; font-size:12px;" onclick="openFolderPicker()">📁 폴더</button>
     <button class="action-btn danger" style="padding:6px 12px; font-size:12px;" onclick="bulkDeleteSelected()">삭제</button>
   </div>
   <div style="padding:6px 16px 0; font-size:11px; color:var(--text2);" id="list-longpress-hint">고객사를 길게 누르면 여러 개를 선택할 수 있어요</div>
@@ -994,7 +995,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.06</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.07</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1174,6 +1175,18 @@
 <!-- COLOR PICKER POPUP -->
 <div class="color-picker-popup" id="color-picker"></div>
 
+<!-- FOLDER PICKER POPUP -->
+<div id="folder-picker-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:610;" onclick="closeFolderPicker()"></div>
+<div id="folder-picker-popup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:611; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; width:280px; max-width:calc(100vw - 40px); max-height:70vh; overflow-y:auto;">
+  <div style="font-weight:700; font-size:14px; margin-bottom:10px;">폴더로 이동</div>
+  <div id="folder-picker-list"></div>
+  <div style="display:flex; gap:6px; margin-top:10px;">
+    <input type="text" class="form-input" id="folder-picker-new-name" placeholder="새 폴더 이름" style="flex:1; font-size:13px;">
+    <button class="add-entry-btn" style="margin-top:0; padding:8px 10px;" onclick="createManualFolderFromPicker()">추가</button>
+  </div>
+  <button class="action-btn secondary" style="width:100%; margin-top:10px; padding:8px;" onclick="closeFolderPicker()">닫기</button>
+</div>
+
 <!-- 같은 주소에 병합된 핀 클릭 시 고객사 선택 팝업 -->
 <div id="merged-pin-overlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:900; align-items:flex-end; justify-content:center;" onclick="closeMergedChooser(event)">
   <div style="background:var(--surface); width:100%; max-width:440px; border-radius:16px 16px 0 0; padding:16px; max-height:60vh; overflow-y:auto;" onclick="event.stopPropagation()">
@@ -1217,6 +1230,7 @@ function ensureUncategorized() {
 const REMIND_KEY = 'coway_remind_days_v1';
 const ROUTE_HIST_KEY = 'coway_route_history_v1';
 const TRASH_KEY = 'coway_trash_v1';
+const MANUAL_FOLDER_KEY = 'coway_manual_folders_v1';
 const DELETED_IDS_KEY = 'coway_deleted_ids_v1';
 const DELETED_ROUTE_HIST_KEY = 'coway_deleted_route_hist_v1';
 
@@ -1269,6 +1283,7 @@ const PALETTE = [
 
 let customers = [];
 let categories = [];
+let manualFolders = []; // { id, name } - 사용자가 직접 만든 폴더
 let routeHistory = [];
 let trash = []; // 삭제된 고객사 보관 (복원 가능)
 let markers = {};
@@ -1349,6 +1364,7 @@ async function loadData() {
       ensureUncategorized();
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       trash = JSON.parse(localStorage.getItem(TRASH_KEY) || '[]');
+      manualFolders = JSON.parse(localStorage.getItem(MANUAL_FOLDER_KEY) || '[]');
       ensureAddressIds();
       migrateContactsToAddresses();
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
@@ -1364,6 +1380,7 @@ async function loadData() {
       ensureUncategorized();
       routeHistory = data.routeHistory || [];
       trash = data.trash || [];
+      manualFolders = data.manualFolders || [];
       ensureAddressIds();
       migrateContactsToAddresses();
       // 로컬 백업
@@ -1371,6 +1388,7 @@ async function loadData() {
       localStorage.setItem(CAT_KEY, JSON.stringify(categories));
       localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
       localStorage.setItem(TRASH_KEY, JSON.stringify(trash));
+      localStorage.setItem(MANUAL_FOLDER_KEY, JSON.stringify(manualFolders));
       resolve();
     };
 
@@ -1383,6 +1401,7 @@ async function loadData() {
       ensureUncategorized();
       routeHistory = JSON.parse(localStorage.getItem(ROUTE_HIST_KEY) || '[]');
       trash = JSON.parse(localStorage.getItem(TRASH_KEY) || '[]');
+      manualFolders = JSON.parse(localStorage.getItem(MANUAL_FOLDER_KEY) || '[]');
       ensureAddressIds();
       migrateContactsToAddresses();
       showToast('오프라인 모드 - 로컬 데이터 사용 중');
@@ -1397,6 +1416,7 @@ async function saveData() {
   localStorage.setItem(CAT_KEY, JSON.stringify(categories));
   localStorage.setItem(ROUTE_HIST_KEY, JSON.stringify(routeHistory));
   localStorage.setItem(TRASH_KEY, JSON.stringify(trash));
+  localStorage.setItem(MANUAL_FOLDER_KEY, JSON.stringify(manualFolders));
   return await mergeAndSaveToSheet();
 }
 
@@ -1456,12 +1476,18 @@ async function mergeAndSaveToSheet() {
         trash.sort((a,b) => (b.deletedAt||'').localeCompare(a.deletedAt||''));
         if (trash.length > 200) trash = trash.slice(0, 200);
       }
+      if (remote.manualFolders && remote.manualFolders.length > 0) {
+        const localFolderIds = new Set(manualFolders.map(f => f.id));
+        remote.manualFolders.forEach(rf => {
+          if (!localFolderIds.has(rf.id)) { manualFolders.push(rf); localFolderIds.add(rf.id); }
+        });
+      }
     }
   } catch(err) {
     console.error('merge fetch error', err);
   }
 
-  const payload = JSON.stringify({ customers, categories, routeHistory, trash });
+  const payload = JSON.stringify({ customers, categories, routeHistory, trash, manualFolders });
 
   // 2. 저장 전송 (POST는 안정적으로 작동 확인됨) - 즉시 처리, 검증 대기 없음
   await saveToSheetViaForm(payload);
@@ -3014,41 +3040,74 @@ function renderListBody() {
     return;
   }
 
-  // 같은 고객사명끼리 폴더로 묶기
+  // 사용자가 만든 수동 폴더로 먼저 묶기
+  const manualFolderIds = new Set(manualFolders.map(f => f.id));
+  const manualGroups = {};
+  const rest = [];
+  list.forEach(c => {
+    if (c.manualFolderId && manualFolderIds.has(c.manualFolderId)) {
+      (manualGroups[c.manualFolderId] = manualGroups[c.manualFolderId] || []).push(c);
+    } else {
+      rest.push(c);
+    }
+  });
+
+  // 같은 고객사명끼리 폴더로 묶기 (수동 폴더에 안 들어간 나머지만)
   const grouped = {};
   const nameOrder = [];
-  list.forEach(c => {
+  rest.forEach(c => {
     if (!grouped[c.name]) { grouped[c.name] = []; nameOrder.push(c.name); }
     grouped[c.name].push(c);
   });
 
+  const renderCustomerRow = (c, indented) => {
+    const color = getCategoryColor(c.category);
+    const catName = getCategoryName(c.category);
+    const addrs = (c.addresses || []);
+    const addrLabel = addrs.length > 0 ? addrs.map(a => a.label || a.address).filter(Boolean).join(' · ') : '';
+    const isChecked = selectedListIds.has(c.id);
+    const lastOwn = [...(c.logs || [])].sort((a,b) => b.date.localeCompare(a.date))[0];
+    return `<div class="contact-row list-item-row" data-cid="${c.id}" style="cursor:pointer;${indented ? ' padding-left:28px; background:var(--surface2);' : ''}">
+      ${listSelectMode ? `<input type="checkbox" class="list-item-checkbox" ${isChecked ? 'checked' : ''} style="width:18px;height:18px;flex-shrink:0;margin-right:6px;" onclick="toggleListSelect('${c.id}'); event.stopPropagation();">` : ''}
+      <div style="flex:1; min-width:0;">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <span class="legend-dot" style="background:${color}; width:10px; height:10px; flex-shrink:0;"></span>
+          <span style="font-weight:600;font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.name}</span>
+        </div>
+        <div style="font-size:12px;color:var(--text2);">${catName}${addrLabel ? ' · ' + addrLabel : ''}${lastOwn ? ' · 최근: ' + lastOwn.date : ''}</div>
+      </div>
+      ${!listSelectMode ? '<span style="color:var(--text2);font-size:18px;">›</span>' : ''}
+    </div>`;
+  };
+
   let html = '';
+
+  if (manualFolders.length > 0) {
+    manualFolders.forEach(f => {
+      const group = manualGroups[f.id] || [];
+      const folderKey = 'mfolder_' + f.id;
+      const isOpen = listFolderState[folderKey] || false;
+      html += `<div style="border-bottom:1px solid var(--border);">
+        <div class="contact-row" style="cursor:pointer; background:var(--surface2);">
+          <div style="flex:1; min-width:0; display:flex; align-items:center; gap:6px;" onclick="toggleListFolder('${folderKey}')">
+            <span style="font-size:14px;">${isOpen ? '📂' : '📁'}</span>
+            <span style="font-weight:700;font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;">${f.name}</span>
+            <span style="font-size:11px; color:var(--text2); flex-shrink:0;">${group.length}개</span>
+          </div>
+          <span style="color:var(--text2);font-size:16px;" onclick="toggleListFolder('${folderKey}')">${isOpen ? '▴' : '▾'}</span>
+        </div>
+        ${isOpen ? (group.length > 0 ? group.map(c => renderCustomerRow(c, true)).join('') : '<div style="padding:10px 28px; font-size:12px; color:var(--text2);">비어있는 폴더예요. 목록에서 고객사를 선택 후 "📁 폴더"로 이동해보세요.</div>') : ''}
+      </div>`;
+    });
+  }
+
   nameOrder.forEach(name => {
     const group = grouped[name];
     const allLogs = group.flatMap(c => c.logs || []);
     const lastAny = [...allLogs].sort((a,b) => b.date.localeCompare(a.date))[0];
 
     if (group.length === 1) {
-      // 단일 고객사 — 기존 스타일 그대로
-      const c = group[0];
-      const color = getCategoryColor(c.category);
-      const catName = getCategoryName(c.category);
-      const addrs = (c.addresses || []);
-      const addrLabel = addrs.length > 0
-        ? addrs.map(a => a.label || a.address).filter(Boolean).join(' · ')
-        : '';
-      const isChecked = selectedListIds.has(c.id);
-      html += `<div class="contact-row list-item-row" data-cid="${c.id}" style="cursor:pointer;">
-        ${listSelectMode ? `<input type="checkbox" class="list-item-checkbox" ${isChecked ? 'checked' : ''} style="width:18px;height:18px;flex-shrink:0;margin-right:6px;" onclick="toggleListSelect('${c.id}'); event.stopPropagation();">` : ''}
-        <div style="flex:1; min-width:0;">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-            <span class="legend-dot" style="background:${color}; width:10px; height:10px; flex-shrink:0;"></span>
-            <span style="font-weight:600;font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${c.name}</span>
-          </div>
-          <div style="font-size:12px;color:var(--text2);">${catName}${addrLabel ? ' · ' + addrLabel : ''}${lastAny ? ' · 최근: ' + lastAny.date : ''}</div>
-        </div>
-        ${!listSelectMode ? '<span style="color:var(--text2);font-size:18px;">›</span>' : ''}
-      </div>`;
+      html += renderCustomerRow(group[0], false);
     } else {
       // 동명 다주소 — 폴더로 묶기
       const folderKey = 'folder_' + encodeURIComponent(name);
@@ -3172,6 +3231,59 @@ function setupDragReorder(containerId, rowSelector, getArray, onCommit) {
 
 function toggleListFolder(key) {
   listFolderState[key] = !listFolderState[key];
+  renderListBody();
+}
+
+// ==================== 수동 폴더 (사용자 생성/해체 + 이동) ====================
+function openFolderPicker() {
+  if (selectedListIds.size === 0) { showToast('먼저 고객사를 선택해주세요'); return; }
+  const listEl = document.getElementById('folder-picker-list');
+  if (manualFolders.length === 0) {
+    listEl.innerHTML = '<div style="font-size:12px; color:var(--text2); padding:6px 0;">아직 만든 폴더가 없어요</div>';
+  } else {
+    listEl.innerHTML = manualFolders.map(f => `
+      <div style="display:flex; align-items:center; gap:6px; padding:8px 0; border-bottom:1px solid var(--border);">
+        <span style="flex:1; font-size:13px; cursor:pointer;" onclick="assignSelectedToFolder('${f.id}')">📁 ${f.name}</span>
+        <button class="remove-btn" title="폴더 해체" onclick="dissolveManualFolder('${f.id}')">−</button>
+      </div>`).join('');
+  }
+  listEl.innerHTML += `<div style="padding:8px 0; font-size:13px; cursor:pointer; color:var(--text2);" onclick="assignSelectedToFolder(null)">📤 폴더에서 빼기(미지정)</div>`;
+  document.getElementById('folder-picker-backdrop').style.display = 'block';
+  document.getElementById('folder-picker-popup').style.display = 'block';
+  document.getElementById('folder-picker-new-name').value = '';
+}
+
+function closeFolderPicker() {
+  document.getElementById('folder-picker-backdrop').style.display = 'none';
+  document.getElementById('folder-picker-popup').style.display = 'none';
+}
+
+function createManualFolderFromPicker() {
+  const input = document.getElementById('folder-picker-new-name');
+  const name = (input.value || '').trim();
+  if (!name) { showToast('폴더 이름을 입력해주세요'); return; }
+  const folder = { id: 'mf_' + Date.now() + '_' + Math.random().toString(36).slice(2,6), name };
+  manualFolders.push(folder);
+  assignSelectedToFolder(folder.id);
+}
+
+function assignSelectedToFolder(folderId) {
+  selectedListIds.forEach(id => {
+    const c = customers.find(x => x.id === id);
+    if (c) { if (folderId) c.manualFolderId = folderId; else delete c.manualFolderId; }
+  });
+  closeFolderPicker();
+  exitListSelectMode();
+  saveData();
+  showToast(folderId ? '폴더로 이동했습니다' : '폴더에서 뺐습니다');
+}
+
+function dissolveManualFolder(folderId) {
+  if (!confirm('이 폴더를 해체할까요? 폴더 안 고객사는 미지정 상태로 남아요.')) return;
+  customers.forEach(c => { if (c.manualFolderId === folderId) delete c.manualFolderId; });
+  manualFolders = manualFolders.filter(f => f.id !== folderId);
+  saveData();
+  openFolderPicker();
   renderListBody();
 }
 

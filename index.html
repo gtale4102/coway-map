@@ -6,12 +6,12 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="고객사지도">
+<meta name="apple-mobile-web-app-title" content="B2BC고객사지도">
 <meta name="theme-color" content="#0f1117">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>고객사 지도</title>
+<title>코웨이 B2BC 고객사 지도</title>
 <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=1f8090d36c43b8db729e5495eb0a0d59&libraries=services,clusterer&autoload=false"></script>
 <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
@@ -729,7 +729,7 @@
 <!-- LOCK SCREEN -->
 <div id="lock-screen" style="display:none;">
   <div style="font-size:40px;">🔒</div>
-  <h2>고객사 지도</h2>
+  <h2>코웨이 B2BC 고객사 지도</h2>
   <p>6자리 PIN을 입력하세요</p>
   <div class="pin-dots" id="pin-dots">
     <div class="pin-dot" id="d0"></div>
@@ -759,7 +759,7 @@
 <!-- MAIN UI -->
 <div id="main-ui">
   <div class="topbar">
-    <h1>📍 고객사 지도</h1>
+    <h1>📍 코웨이 B2BC 고객사 지도</h1>
     <div class="topbar-actions">
       <div class="icon-btn" onclick="openSheet('settings-sheet')" title="설정">⚙️</div>
       <div class="icon-btn" onclick="openSheet('category-sheet')" title="분류 관리">🏷️</div>
@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.42</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.52</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -2483,6 +2483,7 @@ function openMergedChooser(members) {
     </div>`;
   }).join('');
   document.getElementById('merged-pin-overlay').style.display = 'flex';
+  pushNavGuard();
 }
 
 function closeMergedChooser(e) {
@@ -4224,6 +4225,7 @@ function closeTopmostLayer() {
   if (isVisible('folder-rename-popup')) { closeFolderRenamePopup(); return true; }
   if (isVisible('folder-context-menu-popup')) { closeFolderContextMenu(); return true; }
   if (isVisible('folder-picker-popup')) { closeFolderPicker(); return true; }
+  if (isVisible('merged-pin-overlay')) { closeMergedChooser(); return true; }
   if (isVisible('color-picker')) { document.getElementById('color-picker').classList.remove('open'); return true; }
   if (isVisible('address-search-overlay')) { closeAddressSearch(); return true; }
   if (isVisible('route-picker')) { closeRoutePicker(); return true; }
@@ -4267,7 +4269,13 @@ function cancelExitApp() {
 function confirmExitApp() {
   document.getElementById('exit-confirm-backdrop').style.display = 'none';
   document.getElementById('exit-confirm-popup').style.display = 'none';
-  backExiting = true; // 더 이상 뒤로가기를 가로채지 않음 -> 다음 뒤로가기(또는 이 popstate 이후)에 실제로 앱을 벗어남
+  backExiting = true; // 더 이상 뒤로가기를 가로채지 않음
+  // 사용자가 뒤로가기를 한 번 더 누르길 수동으로 기다리지 않고, 여기서 바로 한 번 더 뒤로가기를
+  // 시도한다 - 이 시점 뒤에 진짜 이전 페이지가 있으면 즉시 그리로 넘어가 화면을 벗어나고,
+  // 없으면(이 세션의 첫 진입 화면인 경우) 브라우저/웹뷰 자체가 더 갈 곳이 없다고 판단해
+  // 알아서 처리한다(예: 웹뷰 컨테이너가 앱을 닫음). 어느 쪽이든 사용자가 한 번 더 누를
+  // 필요 없이 "종료" 클릭 즉시 반응하게 된다.
+  history.back();
 }
 
 window.addEventListener('popstate', function() {
@@ -4471,6 +4479,18 @@ function _computeAutoFitWidths(headers, rowsOut, opts) {
   return widths;
 }
 
+// 지정한 컬럼(afterCols, 1-based) "뒤"에만 세로 구분선을 넣는다 - 전체 격자가 아니라 의미
+// 단위 그룹 경계만 표시. 기존에 설정된 border(가로 구분선 등)를 덮어쓰지 않도록 병합해서 적용.
+function applyGroupDividers(ws, rowStart, rowEnd, afterCols, colorArgb) {
+  afterCols.forEach(c => {
+    for (let r = rowStart; r <= rowEnd; r++) {
+      const cell = ws.getCell(r, c);
+      const existing = cell.border || {};
+      cell.border = { ...existing, right: { style: 'thin', color: { argb: colorArgb } } };
+    }
+  });
+}
+
 // ==================== 고객사 데이터 가져오기/내보내기 (작업 D/F/H 2026-07) ====================
 // "고객사 정보 내보내기"가 한 파일에 시트 2개를 만든다:
 //  - "기존 고객사": 숨김 열(_고객사ID/_주소ID/_체크섬) 포함, 수정·삭제 전용.
@@ -4520,6 +4540,38 @@ function _isExistingRowBlank(row) {
 }
 
 const REIMPORT_LOG_TYPE_MAP = { '방문': 'visit', '전화': 'call', '메시지': 'sms', '문자': 'sms' };
+const REIMPORT_LOG_TYPE_LABEL = { visit: '방문', call: '전화', sms: '메시지' };
+
+// 특정 주소(addressId)에 연결된 컨택이력 중 가장 최근 것(날짜 문자열 기준, 동률이면 배열상 나중 항목).
+// addressId가 없는(공용) 로그는 대상에서 제외 - "기존 고객사" 시트는 주소 단위로만 표시하기 때문.
+function _mostRecentLogForAddress(customer, addressId) {
+  if (!addressId) return null;
+  const matching = (customer.logs || []).filter(l => l.addressId === addressId);
+  if (matching.length === 0) return null;
+  let best = matching[0];
+  matching.forEach(l => { if ((l.date || '') >= (best.date || '')) best = l; });
+  return best;
+}
+
+// 위 함수의 결과를 엑셀 셀에 그대로 쓸 수 있는 { date, typeLabel, memo } 형태로 변환.
+function _recentLogFields(customer, addressId) {
+  const log = _mostRecentLogForAddress(customer, addressId);
+  return log
+    ? { date: log.date || '', typeLabel: REIMPORT_LOG_TYPE_LABEL[log.type] || '', memo: log.memo || '' }
+    : { date: '', typeLabel: '', memo: '' };
+}
+
+// "기존 고객사" 시트 한 행의 체크섬 계산 입력을 만드는 공용 함수. buildExportRows(내보내기 시점)와
+// computeReimportDiff(재가져오기 시 라이브 재계산) 양쪽이 반드시 동일한 구조로 호출해야
+// "값이 안 바뀌었으면 체크섬도 같다"는 전제가 성립한다. logFields를 포함시켜서, 컨택이력
+// 표시 칸이 내보내기 이후 바뀌었는지(동시편집)도 다른 필드와 동일하게 충돌 감지 대상이 되게 한다.
+function _checksumInputForAddress(name, owner, catName, memo, addr, logFields) {
+  return [
+    [name || '', owner || '', catName || '', memo || ''],
+    [addr.label || '', addr.address || '', addr.detail || '', addr.contactName || '', addr.contactPhone || ''],
+    [logFields.date, logFields.typeLabel, logFields.memo],
+  ];
+}
 
 // "신규 추가" 시트에서 같은 고객사명끼리 묶인 행들을 addresses[]/logs[]로 변환.
 // addedCustomers/nameConflicts 양쪽에서 공용으로 쓰는 순수 함수.
@@ -4556,30 +4608,33 @@ function _parseNewGroupRows(name, rows, warnings) {
 }
 
 // customers[] 배열로부터 내보내기용 (메인 시트 행 목록, 메타 스냅샷 목록) 생성. 순수 함수.
+// 각 주소 행에는 그 주소의 가장 최근 컨택이력(날짜/유형/메모)도 함께 채워서 내보낸다.
 function buildExportRows(liveCustomers, liveCategories) {
   const rowsOut = [];
   const metaRows = [];
+  const BLANK_ADDR = { label: '', address: '', detail: '', contactName: '', contactPhone: '' };
+  const BLANK_LOG = { date: '', typeLabel: '', memo: '' };
   liveCustomers.forEach(c => {
     const catName = _categoryNameById(c.category, liveCategories);
     const addrs = c.addresses || [];
     if (addrs.length === 0) {
-      const checksum = _simpleChecksum([[c.name || '', c.owner || '', catName, c.memo || ''], ['', '', '', '', '']]);
+      const checksum = _simpleChecksum(_checksumInputForAddress(c.name, c.owner, catName, c.memo, BLANK_ADDR, BLANK_LOG));
       rowsOut.push({
         '고객사명': c.name || '', '소유자': c.owner || '', '분류': catName, '메모': c.memo || '',
         '주소구분': '', '주소': '', '상세주소': '', '담당자명': '', '담당자 전화번호': '',
+        '컨택날짜': '', '컨택유형': '', '컨택메모': '',
         '_고객사ID': c.id, '_주소ID': '', '_체크섬': checksum,
       });
       metaRows.push({ 고객사ID: c.id, 주소ID: '' });
     } else {
       addrs.forEach(a => {
-        const checksum = _simpleChecksum([
-          [c.name || '', c.owner || '', catName, c.memo || ''],
-          [a.label || '', a.address || '', a.detail || '', a.contactName || '', a.contactPhone || ''],
-        ]);
+        const logFields = _recentLogFields(c, a.id);
+        const checksum = _simpleChecksum(_checksumInputForAddress(c.name, c.owner, catName, c.memo, a, logFields));
         rowsOut.push({
           '고객사명': c.name || '', '소유자': c.owner || '', '분류': catName, '메모': c.memo || '',
           '주소구분': a.label || '', '주소': a.address || '', '상세주소': a.detail || '',
           '담당자명': a.contactName || '', '담당자 전화번호': a.contactPhone || '',
+          '컨택날짜': logFields.date, '컨택유형': logFields.typeLabel, '컨택메모': logFields.memo,
           '_고객사ID': c.id, '_주소ID': a.id, '_체크섬': checksum,
         });
         metaRows.push({ 고객사ID: c.id, 주소ID: a.id });
@@ -4668,6 +4723,7 @@ function computeReimportDiff(existingRows, metaRows, newRows, liveCustomers, liv
     const liveAddrById = new Map((live.addresses || []).map(a => [a.id, a]));
     const addedAddresses = [];
     const modifiedAddresses = [];
+    const addedLogs = []; // [{ addressId, type, date, memo }] - 이 주소에 새로 추가할 컨택이력
     const addrConflicts = [];
     const remainingAddrIdsForCust = new Set();
 
@@ -4684,10 +4740,8 @@ function computeReimportDiff(existingRows, metaRows, newRows, liveCustomers, liv
         }
         if (rowBlank) return; // remainingAddrIdsForCust에 안 넣음 -> 아래에서 자동으로 삭제 후보 처리
         remainingAddrIdsForCust.add(addrId);
-        const liveChecksumNow = _simpleChecksum([
-          [live.name || '', live.owner || '', liveCatName, live.memo || ''],
-          [liveAddr.label || '', liveAddr.address || '', liveAddr.detail || '', liveAddr.contactName || '', liveAddr.contactPhone || ''],
-        ]);
+        const liveRecentLog = _recentLogFields(live, addrId);
+        const liveChecksumNow = _simpleChecksum(_checksumInputForAddress(live.name, live.owner, liveCatName, live.memo, liveAddr, liveRecentLog));
         const fileChecksum = (r['_체크섬'] || '').toString();
         if (fileChecksum && liveChecksumNow !== fileChecksum) {
           addrConflicts.push({ addressId: addrId, reason: '이 고객사(또는 이 주소)는 내보내기 이후 다른 곳에서 이미 변경된 것으로 보입니다.' });
@@ -4703,13 +4757,32 @@ function computeReimportDiff(existingRows, metaRows, newRows, liveCustomers, liv
           if (newAddrVals[f] !== liveVal) addrChanges[f] = { old: liveVal, new: newAddrVals[f] };
         });
         if (Object.keys(addrChanges).length > 0) modifiedAddresses.push({ addressId: addrId, changes: addrChanges });
+
+        // 컨택이력 칸(컨택날짜/컨택유형/컨택메모): 값을 그대로 두면(=liveRecentLog와 동일) 아무 일도
+        // 안 하고, 비우면(날짜 없음) 기존 이력을 그대로 두며(삭제 안 함), 다르게 바꾸면 새 이력을 추가한다.
+        let fileLogDateRaw = (r['컨택날짜'] || '').toString().trim();
+        if (r['컨택날짜'] instanceof Date) fileLogDateRaw = r['컨택날짜'].toISOString().slice(0, 10);
+        else if (/^\d{4}-\d{2}-\d{2}/.test(fileLogDateRaw)) fileLogDateRaw = fileLogDateRaw.slice(0, 10);
+        const fileLogTypeLabel = (r['컨택유형'] || '').toString().trim();
+        const fileLogMemo = (r['컨택메모'] || '').toString().trim();
+        if (fileLogDateRaw) {
+          const logChanged = fileLogDateRaw !== liveRecentLog.date || fileLogTypeLabel !== liveRecentLog.typeLabel || fileLogMemo !== liveRecentLog.memo;
+          if (logChanged) {
+            const logType = REIMPORT_LOG_TYPE_MAP[fileLogTypeLabel];
+            if (!logType) {
+              result.warnings.push(`'${live.name}' 고객사의 '${newAddrVals.label || newAddrVals.address}' 주소는 컨택유형이 방문/전화/메시지 중 하나로 명확하지 않아 컨택이력을 추가하지 않았습니다.`);
+            } else {
+              addedLogs.push({ addressId: addrId, type: logType, date: fileLogDateRaw, memo: fileLogMemo });
+            }
+          }
+        }
       } else if (hasAddrText) {
         addedAddresses.push({
           label: (r['주소구분'] || '').trim(), address: (r['주소'] || '').trim(), detail: (r['상세주소'] || '').trim(),
           contactName: (r['담당자명'] || '').trim(), contactPhone: (r['담당자 전화번호'] || '').trim(),
         });
       } else if (!rowBlank) {
-        const liveChecksumNow = _simpleChecksum([[live.name || '', live.owner || '', liveCatName, live.memo || ''], ['', '', '', '', '']]);
+        const liveChecksumNow = _simpleChecksum(_checksumInputForAddress(live.name, live.owner, liveCatName, live.memo, { label: '', address: '', detail: '', contactName: '', contactPhone: '' }, { date: '', typeLabel: '', memo: '' }));
         const fileChecksum = (r['_체크섬'] || '').toString();
         if (fileChecksum && liveChecksumNow !== fileChecksum) {
           addrConflicts.push({ addressId: null, reason: '이 고객사는 내보내기 이후 다른 곳에서 이미 변경된 것으로 보입니다.' });
@@ -4726,7 +4799,7 @@ function computeReimportDiff(existingRows, metaRows, newRows, liveCustomers, liv
       });
 
     const anyConflict = addrConflicts.length > 0;
-    const anyChange = Object.keys(custChanges).length > 0 || addedAddresses.length > 0 || modifiedAddresses.length > 0 || deletedAddresses.length > 0;
+    const anyChange = Object.keys(custChanges).length > 0 || addedAddresses.length > 0 || modifiedAddresses.length > 0 || deletedAddresses.length > 0 || addedLogs.length > 0;
 
     if (anyConflict) {
       result.conflicts.push({
@@ -4734,7 +4807,7 @@ function computeReimportDiff(existingRows, metaRows, newRows, liveCustomers, liv
         addrConflicts, custChanges, addedAddresses, modifiedAddresses, deletedAddresses,
       });
     } else if (anyChange) {
-      result.customerChanges.push({ customerId: custId, customerName: live.name, custChanges, addedAddresses, modifiedAddresses, deletedAddresses });
+      result.customerChanges.push({ customerId: custId, customerName: live.name, custChanges, addedAddresses, modifiedAddresses, deletedAddresses, addedLogs });
     }
   });
 
@@ -4803,6 +4876,9 @@ async function exportCustomerDataForEdit() {
           "'기존 고객사' 시트의 숨겨진 열\n(고객사ID/주소ID/체크섬)은\n지우거나 값을 바꾸지 마세요.",
           "'기존 고객사' 시트에서 행의 보이는 칸을\n전부 비우면, 그 행(주소, 주소가 없으면\n고객사 전체)이 삭제 예정으로 표시됩니다.",
           "'신규 추가' 시트에 기존과 같은 이름을\n입력하면 미리보기에서 '이름 중복'으로\n표시되고, 신규 등록할지 기존 고객사에\n주소만 추가할지 선택할 수 있습니다.",
+          "'기존 고객사' 시트의 컨택날짜/컨택유형/\n컨택메모는 그 주소의 가장 최근 이력을\n보여주는 칸입니다.",
+          "값을 그대로 두면 이력이 중복 추가되지\n않고, 비우면 이번엔 기록하지 않을 뿐\n기존 이력은 삭제되지 않습니다.",
+          "값을 다르게 바꾸면 새 이력으로 추가되며,\n기존 이력은 그대로 보존됩니다.",
         ]
       },
       {
@@ -4815,13 +4891,18 @@ async function exportCustomerDataForEdit() {
       },
     ]);
 
+    // 두 시트가 공유하는 방문 컬럼 순서(그룹 경계: 고객사명 | 소유자 | 분류 | 담당자명·전화번호 |
+    // 주소구분·주소·상세주소·메모 | 컨택날짜·유형·메모) - 세로 구분선은 이 그룹 경계에만 넣는다.
+    const VISIBLE_HEADERS = ['고객사명', '소유자', '분류', '담당자명', '담당자 전화번호', '주소구분', '주소', '상세주소', '메모', '컨택날짜', '컨택유형', '컨택메모'];
+    const DIVIDER_AFTER_COLS = [1, 2, 3, 5, 9]; // 고객사명/소유자/분류/담당자전화번호/메모 뒤
+
     // "기존 고객사" 시트 - 수정·삭제 전용 (숨김 ID 열 포함), 소유자 필터 적용됨
     // "어떤 컬럼을 만들지"는 이 고정 배열(existingHeaders) 하나로만 결정되고, 폭 계산
     // 결과(existingWidths)는 오직 각 컬럼의 width 값에만 쓰인다 - 데이터가 없는 컬럼도
     // existingHeaders.map()에서 빠지지 않고 항상 그대로 나오며, 혹시 폭 계산이 특정 헤더에
     // 대해 값을 못 돌려주더라도(있어선 안 되지만) `|| 10`으로 최소 폭을 보장한다.
     const existingWs = wb.addWorksheet('기존 고객사');
-    const existingHeaders = ['고객사명', '소유자', '분류', '메모', '주소구분', '주소', '상세주소', '담당자명', '담당자 전화번호', '_고객사ID', '_주소ID', '_체크섬'];
+    const existingHeaders = [...VISIBLE_HEADERS, '_고객사ID', '_주소ID', '_체크섬'];
     const { rowsOut, metaRows } = buildExportRows(filteredCustomers, categories);
     const existingWidths = _computeAutoFitWidths(existingHeaders, rowsOut, { min: 10, max: 42 });
     existingWs.columns = existingHeaders.map(h => ({ header: h, key: h, width: existingWidths[h] || 10 }));
@@ -4830,24 +4911,42 @@ async function exportCustomerDataForEdit() {
 
     rowsOut.forEach(r => existingWs.addRow(r));
     applyGridBorder(existingWs, 2, rowsOut.length + 1, existingHeaders.length);
+    applyGroupDividers(existingWs, 1, rowsOut.length + 1, DIVIDER_AFTER_COLS, XLSX_STYLE.brandDark);
+
+    const catNames = categories.map(c => c.name).filter(Boolean);
+    const catList = '"' + catNames.join(',') + '"';
+    const typeList = '"방문,전화,메시지"';
+    const existingColIndex = (name) => existingHeaders.indexOf(name) + 1;
+    const today = new Date();
+    for (let r = 2; r <= rowsOut.length + 1; r++) {
+      existingWs.getCell(r, existingColIndex('컨택유형')).dataValidation = {
+        type: 'list', allowBlank: true, formulae: [typeList],
+        showErrorMessage: true, errorTitle: '컨택유형 오류', error: '방문/전화/메시지 중에서 선택할 수 있습니다.'
+      };
+      const existingDateCell = existingWs.getCell(r, existingColIndex('컨택날짜'));
+      existingDateCell.numFmt = 'yyyy-mm-dd';
+      existingDateCell.dataValidation = {
+        type: 'date', operator: 'between', allowBlank: true,
+        formulae: [new Date(1900, 0, 1), today],
+        showErrorMessage: true, errorTitle: '컨택날짜 오류', error: '1900-01-01부터 오늘까지의 유효한 날짜만 입력할 수 있습니다.'
+      };
+    }
 
     // "신규 추가" 시트 - 신규 등록 전용, ID 없는 빈 양식 + 컨택이력 컬럼 (필터 무관, 항상 전체 양식)
+    // 기존 고객사 시트와 동일한 컬럼 순서를 그대로 사용해 혼동을 줄인다.
     const newWs = wb.addWorksheet('신규 추가');
-    const newHeaders = ['고객사명', '소유자', '분류', '메모', '담당자명', '담당자 전화번호', '주소구분', '주소', '상세주소', '컨택날짜', '컨택유형', '컨택메모'];
+    const newHeaders = [...VISIBLE_HEADERS];
     // 실제 라이브 데이터 폭을 참고해 auto-fit(빈 양식이라도 현실적인 폭으로), 로그 전용 컬럼은 기본값
     const newWidths = _computeAutoFitWidths(newHeaders, rowsOut, { min: 10, max: 42 });
     newWidths['컨택날짜'] = 12; newWidths['컨택유형'] = 10; newWidths['컨택메모'] = Math.max(newWidths['컨택메모'] || 0, 26);
     newWs.columns = newHeaders.map(h => ({ header: h, key: h, width: newWidths[h] || 10 }));
     styleDataSheetHeader(newWs);
 
-    const catNames = categories.map(c => c.name).filter(Boolean);
-    const catList = '"' + catNames.join(',') + '"';
-    const typeList = '"방문,전화,메시지"';
     const newColIndex = (name) => newHeaders.indexOf(name) + 1;
 
     const NEW_ROWS = 50;
     applyGridBorder(newWs, 2, NEW_ROWS + 1, newHeaders.length);
-    const today = new Date();
+    applyGroupDividers(newWs, 1, NEW_ROWS + 1, DIVIDER_AFTER_COLS, XLSX_STYLE.brandDark);
     for (let r = 2; r <= NEW_ROWS + 1; r++) {
       newWs.getCell(r, newColIndex('분류')).dataValidation = {
         type: 'list', allowBlank: true, formulae: [catList],
@@ -4996,6 +5095,7 @@ function renderReimportPreview(diff) {
       c.addedAddresses.forEach(a => parts.push(`(신규 주소) ${a.label ? a.label + ': ' : ''}${a.address}`));
       c.modifiedAddresses.forEach(a => parts.push(_fmtChanges(a.changes)));
       c.deletedAddresses.forEach(a => parts.push(`(주소 삭제) ${a.label}`));
+      (c.addedLogs || []).forEach(l => parts.push(`(컨택이력 추가) ${l.date} ${REIMPORT_LOG_TYPE_LABEL[l.type] || l.type}${l.memo ? ': ' + l.memo : ''}`));
       const key = encodeURIComponent(_reimportItemKey('changed', c));
       html += `<label class="contact-row" style="cursor:pointer; align-items:flex-start;">
         <input type="checkbox" class="reimport-check" data-kind="changed" data-key="${key}" checked style="margin-right:8px;margin-top:2px;">
@@ -5186,6 +5286,13 @@ async function applyReimportChanges() {
       const delIds = new Set(c.deletedAddresses.map(a => a.addressId));
       target.addresses = (target.addresses || []).filter(a => !delIds.has(a.id));
       deletedAddrCount += c.deletedAddresses.length;
+    }
+
+    // 컨택이력 추가 - 기존 이력은 절대 건드리지 않고 새 이력만 누적(logs[]에 push)
+    for (const l of (c.addedLogs || [])) {
+      target.logs = target.logs || [];
+      target.logs.push({ type: l.type, date: l.date, memo: l.memo, addressId: l.addressId });
+      addedLogCount++;
     }
   }
 

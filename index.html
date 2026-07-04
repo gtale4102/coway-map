@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.52</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.53</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1246,8 +1246,7 @@
 <!-- EXIT CONFIRM POPUP (뒤로가기) -->
 <div id="exit-confirm-backdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.4); z-index:900;"></div>
 <div id="exit-confirm-popup" style="display:none; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); z-index:901; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:20px; width:260px; max-width:calc(100vw - 40px); text-align:center;">
-  <div style="font-size:15px; font-weight:700; margin-bottom:8px;">앱을 종료할까요?</div>
-  <div style="font-size:13px; color:var(--text2); margin-bottom:16px;">뒤로 갈 화면이 더 없어요</div>
+  <div style="font-size:15px; font-weight:700; margin-bottom:16px;">앱을 종료할까요?</div>
   <div style="display:flex; gap:8px;">
     <button class="action-btn secondary" style="flex:1; padding:10px;" onclick="cancelExitApp()">취소</button>
     <button class="action-btn danger" style="flex:1; padding:10px;" onclick="confirmExitApp()">종료</button>

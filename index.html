@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.41</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.42</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -4816,11 +4816,15 @@ async function exportCustomerDataForEdit() {
     ]);
 
     // "기존 고객사" 시트 - 수정·삭제 전용 (숨김 ID 열 포함), 소유자 필터 적용됨
+    // "어떤 컬럼을 만들지"는 이 고정 배열(existingHeaders) 하나로만 결정되고, 폭 계산
+    // 결과(existingWidths)는 오직 각 컬럼의 width 값에만 쓰인다 - 데이터가 없는 컬럼도
+    // existingHeaders.map()에서 빠지지 않고 항상 그대로 나오며, 혹시 폭 계산이 특정 헤더에
+    // 대해 값을 못 돌려주더라도(있어선 안 되지만) `|| 10`으로 최소 폭을 보장한다.
     const existingWs = wb.addWorksheet('기존 고객사');
     const existingHeaders = ['고객사명', '소유자', '분류', '메모', '주소구분', '주소', '상세주소', '담당자명', '담당자 전화번호', '_고객사ID', '_주소ID', '_체크섬'];
     const { rowsOut, metaRows } = buildExportRows(filteredCustomers, categories);
     const existingWidths = _computeAutoFitWidths(existingHeaders, rowsOut, { min: 10, max: 42 });
-    existingWs.columns = existingHeaders.map(h => ({ header: h, key: h, width: existingWidths[h] }));
+    existingWs.columns = existingHeaders.map(h => ({ header: h, key: h, width: existingWidths[h] || 10 }));
     styleDataSheetHeader(existingWs);
     ['_고객사ID', '_주소ID', '_체크섬'].forEach(h => { existingWs.getColumn(existingHeaders.indexOf(h) + 1).hidden = true; });
 
@@ -4833,7 +4837,7 @@ async function exportCustomerDataForEdit() {
     // 실제 라이브 데이터 폭을 참고해 auto-fit(빈 양식이라도 현실적인 폭으로), 로그 전용 컬럼은 기본값
     const newWidths = _computeAutoFitWidths(newHeaders, rowsOut, { min: 10, max: 42 });
     newWidths['컨택날짜'] = 12; newWidths['컨택유형'] = 10; newWidths['컨택메모'] = Math.max(newWidths['컨택메모'] || 0, 26);
-    newWs.columns = newHeaders.map(h => ({ header: h, key: h, width: newWidths[h] }));
+    newWs.columns = newHeaders.map(h => ({ header: h, key: h, width: newWidths[h] || 10 }));
     styleDataSheetHeader(newWs);
 
     const catNames = categories.map(c => c.name).filter(Boolean);

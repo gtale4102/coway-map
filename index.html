@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.40</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.41</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -4371,6 +4371,8 @@ function _drawCardBorder(sheet, rowStart, rowEnd, colCount, colorArgb) {
 // 안내 시트를 "타이틀 배너 + 카드형 섹션(여러 열 병합 + 테두리로 박스 형태)"으로 구성한다.
 // 한 열에 텍스트가 몰려 옆으로 늘어지던 이전 버전과 달리, 여러 개의 좁은 열을 합쳐 적당한
 // 폭(약 6열 × 13폭)의 카드로 보이게 하고, 섹션마다 카드 테두리를 둘러 실제 박스 형태로 구분한다.
+// 각 item 문자열은 자동 줄바꿈(wrapText)에 전적으로 맡기지 않고 "\n"으로 의미 단위 줄바꿈을
+// 직접 넣은 상태로 전달받는다 - 그래야 구절 중간이 아니라 자연스러운 지점에서 끊긴다.
 // sections: [{ icon, heading, items: string[], tip?: boolean }]
 function styleInfoSheet(sheet, title, sections) {
   const COLS = 6;
@@ -4380,11 +4382,11 @@ function styleInfoSheet(sheet, title, sections) {
   sheet.mergeCells(r, 1, r, COLS);
   const titleCell = sheet.getCell(r, 1);
   titleCell.value = title;
-  titleCell.font = { bold: true, size: 15, color: { argb: 'FFFFFFFF' } };
+  titleCell.font = { name: '맑은 고딕', bold: true, size: 15, color: { argb: 'FFFFFFFF' } };
   titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_STYLE.brand } };
   titleCell.alignment = { vertical: 'middle', indent: 1 };
-  sheet.getRow(r).height = 30;
-  r += 2; // 빈 줄
+  sheet.getRow(r).height = 32;
+  r += 2; // 카드 앞 여백
 
   sections.forEach(sec => {
     const sectionStart = r;
@@ -4392,25 +4394,27 @@ function styleInfoSheet(sheet, title, sections) {
     sheet.mergeCells(r, 1, r, COLS);
     const headCell = sheet.getCell(r, 1);
     headCell.value = `${sec.icon}  ${sec.heading}`;
-    headCell.font = { bold: true, size: 12, color: { argb: XLSX_STYLE.brandDark } };
+    headCell.font = { name: '맑은 고딕', bold: true, size: 12, color: { argb: XLSX_STYLE.brandDark } };
     headCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_STYLE.brandLight } };
     headCell.alignment = { vertical: 'middle', indent: 1 };
-    sheet.getRow(r).height = 22;
+    sheet.getRow(r).height = 24;
     r++;
 
     sec.items.forEach(item => {
       sheet.mergeCells(r, 1, r, COLS);
       const cell = sheet.getCell(r, 1);
       cell.value = item;
-      cell.font = { size: 11, color: { argb: XLSX_STYLE.textDark } };
+      cell.font = { name: '맑은 고딕', size: 11, color: { argb: XLSX_STYLE.textDark } };
       cell.alignment = { vertical: 'middle', indent: 2, wrapText: true };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: sec.tip ? XLSX_STYLE.tipBg : XLSX_STYLE.cardBg } };
-      sheet.getRow(r).height = 30;
+      const lineCount = item.split('\n').length;
+      sheet.getRow(r).height = lineCount * 16 + 10; // 줄 수에 맞춰 셀 안 여백감 있게
       r++;
     });
 
     _drawCardBorder(sheet, sectionStart, r - 1, COLS, XLSX_STYLE.brandDark);
-    r++; // 카드 사이 빈 줄
+    sheet.getRow(r).height = 14; // 카드 사이 간격(다음 카드와 분리되어 보이도록)
+    r++;
   });
 }
 
@@ -4418,27 +4422,53 @@ function styleInfoSheet(sheet, title, sections) {
 function styleDataSheetHeader(ws, headerRowNum = 1) {
   const row = ws.getRow(headerRowNum);
   row.eachCell(cell => {
-    cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+    cell.font = { name: '맑은 고딕', bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_STYLE.brand } };
     cell.alignment = { vertical: 'middle', horizontal: 'center' };
     cell.border = { bottom: { style: 'medium', color: { argb: XLSX_STYLE.brandDark } } };
   });
-  row.height = 22;
+  row.height = 24;
   ws.views = [{ state: 'frozen', xSplit: 1, ySplit: headerRowNum }];
 }
 
-// 데이터 영역(rowStart~rowEnd, 1~colCount열)에 옅은 그리드 테두리를 입혀 표처럼 보이게 한다.
+// 데이터 영역(rowStart~rowEnd, 1~colCount열)에 "행 구분선"만 옅게 넣는다(전체 격자 대신 가로줄만
+// -  과한 느낌 없이 헤더/데이터 구분은 자연스럽게 보이도록). 셀 안쪽 여백감을 위해 정렬도 함께 지정.
 function applyGridBorder(ws, rowStart, rowEnd, colCount) {
   for (let r = rowStart; r <= rowEnd; r++) {
+    ws.getRow(r).height = 19;
     for (let c = 1; c <= colCount; c++) {
-      ws.getCell(r, c).border = {
-        top: { style: 'thin', color: { argb: XLSX_STYLE.border } },
-        left: { style: 'thin', color: { argb: XLSX_STYLE.border } },
-        bottom: { style: 'thin', color: { argb: XLSX_STYLE.border } },
-        right: { style: 'thin', color: { argb: XLSX_STYLE.border } },
-      };
+      const cell = ws.getCell(r, c);
+      cell.border = { bottom: { style: 'thin', color: { argb: XLSX_STYLE.border } } };
+      cell.alignment = { vertical: 'middle', horizontal: cell.alignment && cell.alignment.horizontal || 'left', indent: 1 };
+      cell.font = { name: '맑은 고딕', size: 10, color: { argb: XLSX_STYLE.textDark } };
     }
   }
+}
+
+// 문자열의 "표시 폭" 근사값(한글/전각 문자는 라틴 문자의 약 1.8배 폭으로 계산) - 열 너비 auto-fit용.
+function _displayWidth(str) {
+  let w = 0;
+  for (const ch of (str || '').toString()) {
+    w += ch.charCodeAt(0) > 0x2e80 ? 1.8 : 1;
+  }
+  return w;
+}
+
+// headers 각각에 대해 rowsOut(실제 데이터 샘플)에서 가장 긴 값 기준으로 열 너비를 계산한다.
+// 잘림 없이 보이도록 헤더 텍스트 폭과 실제 값 폭 중 큰 쪽 + 여백을 쓰고, min~max로 과도한 폭은 제한.
+function _computeAutoFitWidths(headers, rowsOut, opts) {
+  const minW = (opts && opts.min) || 10;
+  const maxW = (opts && opts.max) || 42;
+  const widths = {};
+  headers.forEach(h => {
+    let longest = _displayWidth(h);
+    rowsOut.forEach(r => {
+      const w = _displayWidth(r[h]);
+      if (w > longest) longest = w;
+    });
+    widths[h] = Math.min(maxW, Math.max(minW, longest + 3));
+  });
+  return widths;
 }
 
 // ==================== 고객사 데이터 가져오기/내보내기 (작업 D/F/H 2026-07) ====================
@@ -4747,49 +4777,63 @@ function computeReimportDiff(existingRows, metaRows, newRows, liveCustomers, liv
 
 async function exportCustomerDataForEdit() {
   try {
+    // 지도 화면의 소유자 필터(전체/나/상대방)를 그대로 반영 - "기존 고객사" 시트·메타 스냅샷에만
+    // 적용된다. 필터로 빠진 고객사는 메타에도 안 들어가므로, 재가져오기 때 "파일에 없음=삭제 후보"
+    // 판정 대상에서 구조적으로 제외된다("남이 내보내기 이후 추가한 데이터는 메타에 없어 삭제 후보
+    // 제외"라는 기존 원칙과 동일한 메커니즘). "신규 추가" 시트는 필터와 무관하게 항상 빈 상태.
+    const filteredCustomers = ownerFilter === 'me' ? customers.filter(c => c.owner === currentUser)
+      : ownerFilter === 'partner' ? customers.filter(c => c.owner !== currentUser)
+      : customers;
+    const filterLabel = ownerFilter === 'all' ? '전체' : (ownerFilter === 'me' ? (currentUser === '태일' ? '김태일' : currentUser) : (currentUser === '태일' ? '정열' : '김태일'));
+
     const wb = new ExcelJS.Workbook();
 
     const infoSheet = wb.addWorksheet('안내');
     styleInfoSheet(infoSheet, '📤 고객사 정보 파일 안내', [
       {
         icon: '📖', heading: '사용 방법', items: [
-          "이 파일에는 시트가 2개 있습니다 — '기존 고객사'(수정·삭제용), '신규 추가'(새 고객사 등록용).",
-          "수정·삭제는 '기존 고객사' 시트에서, 새로 등록할 고객사는 '신규 추가' 시트에서 입력하세요.",
-          '값을 입력/수정한 뒤 저장하고, 지도 앱의 "가져오기" 버튼으로 이 파일을 업로드하세요.',
+          "이 파일에는 시트가 2개 있습니다 —\n'기존 고객사'(수정·삭제용),\n'신규 추가'(새 고객사 등록용).",
+          "수정·삭제는 '기존 고객사' 시트에서,\n새로 등록할 고객사는 '신규 추가' 시트에서\n입력하세요.",
+          '값을 입력/수정한 뒤 저장하고,\n지도 앱의 "가져오기" 버튼으로\n이 파일을 업로드하세요.',
+          `현재 "${filterLabel}" 필터로 내보냈습니다.\n'기존 고객사' 시트에는 이 범위의\n고객사만 포함됩니다.`,
         ]
       },
       {
         icon: '⚠️', heading: '주의 사항', items: [
-          "'기존 고객사' 시트의 숨겨진 열(고객사ID/주소ID/체크섬)은 지우거나 값을 바꾸지 마세요.",
-          "'기존 고객사' 시트에서 행의 보이는 칸을 전부 비우면, 그 행(주소, 주소가 없으면 고객사 전체)이 삭제 예정으로 표시됩니다.",
-          "'신규 추가' 시트에 기존과 같은 이름을 입력하면 미리보기에서 '이름 중복'으로 표시되고, 신규 등록할지 기존 고객사에 주소만 추가할지 선택할 수 있습니다.",
+          "'기존 고객사' 시트의 숨겨진 열\n(고객사ID/주소ID/체크섬)은\n지우거나 값을 바꾸지 마세요.",
+          "'기존 고객사' 시트에서 행의 보이는 칸을\n전부 비우면, 그 행(주소, 주소가 없으면\n고객사 전체)이 삭제 예정으로 표시됩니다.",
+          "'신규 추가' 시트에 기존과 같은 이름을\n입력하면 미리보기에서 '이름 중복'으로\n표시되고, 신규 등록할지 기존 고객사에\n주소만 추가할지 선택할 수 있습니다.",
         ]
       },
       {
         icon: '💡', heading: '작성 팁', tip: true, items: [
-          "주소가 여러 곳이면, '신규 추가' 시트에 같은 고객사명으로 행을 추가해 한 줄에 주소 1개씩 입력하세요.",
-          "컨택이력(방문/전화/메시지)도 '신규 추가' 시트에서 함께 입력할 수 있습니다. 주소칸은 비워두고 컨택날짜만 입력해도 됩니다.",
-          '분류/컨택유형은 드롭다운에서, 컨택날짜는 날짜 형식으로만 입력하도록 제한되어 있습니다.',
+          "주소가 여러 곳이면, '신규 추가' 시트에\n같은 고객사명으로 행을 추가해\n한 줄에 주소 1개씩 입력하세요.",
+          "컨택이력(방문/전화/메시지)도\n'신규 추가' 시트에서 함께 입력할 수 있습니다.\n주소칸은 비워두고 컨택날짜만 입력해도 됩니다.",
+          '분류/컨택유형은 드롭다운에서,\n컨택날짜는 날짜 형식으로만\n입력하도록 제한되어 있습니다.',
           `내보낸 시각: ${new Date().toLocaleString('ko-KR')}`,
         ]
       },
     ]);
 
-    // "기존 고객사" 시트 - 수정·삭제 전용 (숨김 ID 열 포함)
+    // "기존 고객사" 시트 - 수정·삭제 전용 (숨김 ID 열 포함), 소유자 필터 적용됨
     const existingWs = wb.addWorksheet('기존 고객사');
     const existingHeaders = ['고객사명', '소유자', '분류', '메모', '주소구분', '주소', '상세주소', '담당자명', '담당자 전화번호', '_고객사ID', '_주소ID', '_체크섬'];
-    existingWs.columns = existingHeaders.map(h => ({ header: h, key: h, width: (h === '메모' || h === '주소') ? 28 : 14 }));
+    const { rowsOut, metaRows } = buildExportRows(filteredCustomers, categories);
+    const existingWidths = _computeAutoFitWidths(existingHeaders, rowsOut, { min: 10, max: 42 });
+    existingWs.columns = existingHeaders.map(h => ({ header: h, key: h, width: existingWidths[h] }));
     styleDataSheetHeader(existingWs);
     ['_고객사ID', '_주소ID', '_체크섬'].forEach(h => { existingWs.getColumn(existingHeaders.indexOf(h) + 1).hidden = true; });
 
-    const { rowsOut, metaRows } = buildExportRows(customers, categories);
     rowsOut.forEach(r => existingWs.addRow(r));
     applyGridBorder(existingWs, 2, rowsOut.length + 1, existingHeaders.length);
 
-    // "신규 추가" 시트 - 신규 등록 전용, ID 없는 빈 양식 + 컨택이력 컬럼
+    // "신규 추가" 시트 - 신규 등록 전용, ID 없는 빈 양식 + 컨택이력 컬럼 (필터 무관, 항상 전체 양식)
     const newWs = wb.addWorksheet('신규 추가');
     const newHeaders = ['고객사명', '소유자', '분류', '메모', '담당자명', '담당자 전화번호', '주소구분', '주소', '상세주소', '컨택날짜', '컨택유형', '컨택메모'];
-    newWs.columns = newHeaders.map(h => ({ header: h, key: h, width: (h === '메모' || h === '컨택메모' || h === '주소') ? 28 : 14 }));
+    // 실제 라이브 데이터 폭을 참고해 auto-fit(빈 양식이라도 현실적인 폭으로), 로그 전용 컬럼은 기본값
+    const newWidths = _computeAutoFitWidths(newHeaders, rowsOut, { min: 10, max: 42 });
+    newWidths['컨택날짜'] = 12; newWidths['컨택유형'] = 10; newWidths['컨택메모'] = Math.max(newWidths['컨택메모'] || 0, 26);
+    newWs.columns = newHeaders.map(h => ({ header: h, key: h, width: newWidths[h] }));
     styleDataSheetHeader(newWs);
 
     const catNames = categories.map(c => c.name).filter(Boolean);
@@ -4819,7 +4863,8 @@ async function exportCustomerDataForEdit() {
     }
 
     // 숨김 메타 시트(veryHidden - 엑셀 UI에서 우클릭으로도 숨김 해제 안 됨): "기존 고객사" 시트의
-    // 내보내기 시점 (고객사ID, 주소ID) 스냅샷. 재가져오기 시 "삭제 후보" 판단 기준이 됨(동시편집 대응).
+    // 내보내기 시점 (고객사ID, 주소ID) 스냅샷(필터링된 범위 기준). 재가져오기 시 "삭제 후보"
+    // 판단 기준이 됨(동시편집 대응 + 필터 밖 고객사 오삭제 방지).
     const metaSheet = wb.addWorksheet('_메타');
     metaSheet.state = 'veryHidden';
     metaSheet.columns = [{ header: '고객사ID', key: '고객사ID' }, { header: '주소ID', key: '주소ID' }];
@@ -4835,7 +4880,7 @@ async function exportCustomerDataForEdit() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast(`내보내기 완료 (${customers.length}개 고객사) — 입력/수정 후 "가져오기"로 불러오세요`);
+    showToast(`내보내기 완료 (${filterLabel} · ${filteredCustomers.length}개 고객사) — 입력/수정 후 "가져오기"로 불러오세요`);
   } catch (err) {
     console.error('export for edit error', err);
     showToast('내보내기 중 오류가 발생했습니다');

@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.21</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.30</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1047,36 +1047,27 @@
       <label for="import-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">가져오기</label>
       <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
     </div>
-    <div class="section-divider">📥 신규 고객사 대량 등록</div>
+    <div class="section-divider">📥 고객사 등록 · 수정</div>
     <div class="setting-row">
       <div class="setting-info">
         <div class="setting-title">엑셀 양식 다운로드</div>
-        <div class="setting-desc">컨택유형/분류는 드롭다운으로 선택하는 양식</div>
+        <div class="setting-desc">처음 등록할 때 — 빈 양식 (분류는 드롭다운으로 선택)</div>
       </div>
       <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="downloadExcelTemplate()">양식 받기</button>
     </div>
     <div class="setting-row">
       <div class="setting-info">
-        <div class="setting-title">고객사 일괄 가져오기</div>
-        <div class="setting-desc">위 양식으로 새 고객사를 한번에 추가 (항상 신규 추가됨)</div>
-      </div>
-      <label for="excel-import-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">엑셀 가져오기</label>
-      <input type="file" id="excel-import-file" accept=".xlsx,.xls" style="display:none" onchange="handleExcelImport(event)">
-    </div>
-    <div class="section-divider">✏️ 기존 고객사 데이터 수정</div>
-    <div class="setting-row">
-      <div class="setting-info">
         <div class="setting-title">고객사 데이터 내보내기</div>
-        <div class="setting-desc">기존 고객사 전체를 엑셀로 내보내기 (수정용 별도 양식)</div>
+        <div class="setting-desc">기존 데이터를 수정할 때 — ID가 채워진 양식으로 내보내기</div>
       </div>
       <button class="action-btn secondary" style="padding:8px 12px; font-size:12px;" onclick="exportCustomerDataForEdit()">내보내기</button>
     </div>
     <div class="setting-row">
       <div class="setting-info">
-        <div class="setting-title">수정 후 재가져오기</div>
-        <div class="setting-desc">위에서 내보낸 파일을 수정 후 다시 불러와 반영 (미리보기 확인 후 적용)</div>
+        <div class="setting-title">가져오기</div>
+        <div class="setting-desc">위 양식을 입력/수정한 뒤 업로드 → 미리보기에서 확인 후 반영 (추가·수정·삭제 모두 지원)</div>
       </div>
-      <label for="reimport-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">재가져오기</label>
+      <label for="reimport-file" class="action-btn secondary" style="padding:8px 12px; font-size:12px; cursor:pointer; display:inline-flex; align-items:center; justify-content:center;">가져오기</label>
       <input type="file" id="reimport-file" accept=".xlsx,.xls" style="display:none" onchange="handleReimportFile(event)">
     </div>
     <div class="setting-row">
@@ -1160,23 +1151,11 @@
   </div>
 </div>
 
-<!-- EXCEL IMPORT RESULT SHEET -->
-<div class="bottom-sheet" id="excel-import-sheet">
-  <div class="sheet-handle"></div>
-  <div class="sheet-header">
-    <div class="sheet-title">📥 엑셀 가져오기</div>
-    <button class="sheet-close" onclick="closeAllSheets()">✕</button>
-  </div>
-  <div class="sheet-body" id="excel-import-body">
-    <div class="empty-state"><div>📥</div>처리 중입니다...</div>
-  </div>
-</div>
-
-<!-- REIMPORT(수정용) PREVIEW SHEET -->
+<!-- 가져오기 미리보기 SHEET -->
 <div class="bottom-sheet" id="reimport-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">🔄 재가져오기(수정용) 미리보기</div>
+    <div class="sheet-title">🔄 가져오기 미리보기</div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body" id="reimport-body">
@@ -1318,6 +1297,7 @@ const MANUAL_FOLDER_KEY = 'coway_manual_folders_v1';
 const DELETED_IDS_KEY = 'coway_deleted_ids_v1';
 const DELETED_ROUTE_HIST_KEY = 'coway_deleted_route_hist_v1';
 const DELETED_FOLDER_IDS_KEY = 'coway_deleted_folder_ids_v1';
+const PURGED_TRASH_IDS_KEY = 'coway_purged_trash_ids_v1';
 
 function loadDeletedIds() {
   try { return JSON.parse(localStorage.getItem(DELETED_IDS_KEY) || '[]'); } catch { return []; }
@@ -1354,6 +1334,18 @@ function markFolderDeleted(id) {
 function unmarkDeleted(id) {
   const ids = loadDeletedIds().filter(x => x !== id);
   localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(ids));
+}
+
+// 휴지통에서 "완전삭제"된 항목의 tombstone. trash[] 자체에는 삭제 기록이 없어서
+// 완전삭제 직후 다른 세션이 저장한 원격의 옛 trash 데이터가 병합되며 되살아나는 문제 방지용
+// (markDeleted/markFolderDeleted/markRouteHistDeleted와 동일한 패턴, mergeAndSaveToSheet에서 사용).
+function loadPurgedTrashIds() {
+  try { return JSON.parse(localStorage.getItem(PURGED_TRASH_IDS_KEY) || '[]'); } catch { return []; }
+}
+function markTrashPurged(id) {
+  const ids = loadPurgedTrashIds();
+  if (!ids.includes(id)) ids.push(id);
+  localStorage.setItem(PURGED_TRASH_IDS_KEY, JSON.stringify(ids.slice(-200)));
 }
 
 const PALETTE = [
@@ -1559,9 +1551,10 @@ async function mergeAndSaveToSheet() {
       if (remote.trash && remote.trash.length > 0) {
         const localTrashIds = new Set(trash.map(t => t.id));
         const currentCustomerIds = new Set(customers.map(c => c.id));
+        const purgedTrashIds = new Set(loadPurgedTrashIds());
         remote.trash.forEach(rt => {
-          // 이미 복원되어 customers에 있는 경우는 trash에 다시 넣지 않음
-          if (!localTrashIds.has(rt.id) && !currentCustomerIds.has(rt.id)) {
+          // 이미 복원되어 customers에 있거나, 휴지통에서 완전삭제된 경우는 다시 넣지 않음
+          if (!localTrashIds.has(rt.id) && !currentCustomerIds.has(rt.id) && !purgedTrashIds.has(rt.id)) {
             trash.push(rt);
             localTrashIds.add(rt.id);
           }
@@ -3791,6 +3784,7 @@ async function restoreFromTrash(id) {
 
 async function permanentlyDeleteFromTrash(id) {
   if (!confirm('휴지통에서 영구적으로 삭제하시겠습니까? 복원할 수 없습니다.')) return;
+  markTrashPurged(id);
   trash = trash.filter(t => t.id !== id);
   renderTrashBody();
   await saveTrash();
@@ -4188,7 +4182,6 @@ function closeTopmostLayer() {
     'history-sheet': closeAllSheets,
     'remind-sheet': closeAllSheets,
     'pdf-options-sheet': closeAllSheets,
-    'excel-import-sheet': closeAllSheets,
     'reimport-sheet': closeAllSheets,
     'trash-sheet': closeAllSheets,
   };
@@ -4268,18 +4261,98 @@ function exportData() {
 function importData(e) {
   const file = e.target.files[0];
   if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    try {
-      const data = JSON.parse(ev.target.result);
-      if (data.customers) customers = data.customers;
-      if (data.categories) { categories = data.categories; ensureUncategorized(); }
-      saveData(); saveCats();
-      renderAllMarkers(); renderLegend();
-      showToast('데이터를 가져왔습니다');
-    } catch { showToast('파일 형식이 올바르지 않습니다'); }
-  };
-  reader.readAsText(file);
+  showGenericConfirm('현재 데이터를 파일 내용으로 완전히 덮어씁니다. 계속할까요?', () => {
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (data.customers) customers = data.customers;
+        if (data.categories) { categories = data.categories; ensureUncategorized(); }
+        saveData(); saveCats();
+        renderAllMarkers(); renderLegend();
+        showToast('데이터를 가져왔습니다');
+      } catch { showToast('파일 형식이 올바르지 않습니다'); }
+    };
+    reader.readAsText(file);
+  });
+}
+
+// ==================== EXCEL 스타일 공용 헬퍼 (작업 E: 디자인 통일, 2026-07) ====================
+// 엑셀 양식 다운로드 / 고객사 데이터 내보내기(수정용) 양쪽에서 공유하는 톤(색상·폰트·레이아웃).
+// 코웨이 브랜드 블루 계열 참고.
+const XLSX_STYLE = {
+  brand: 'FF0B5FA5',      // 브랜드 블루 (헤더/타이틀 배경)
+  brandDark: 'FF07406F',  // 브랜드 블루(진함, 섹션 제목 텍스트)
+  brandLight: 'FFE8F1FA', // 브랜드 블루(연함, 섹션 배경)
+  tipBg: 'FFFFF6DF',      // 작성 팁 배경(연노랑)
+  border: 'FFD9E2EC',     // 그리드 테두리
+};
+
+// 안내 시트를 "타이틀 배너 + 섹션(아이콘·배경색·구분선)" 형태로 구성한다.
+// sections: [{ icon, heading, items: string[], tip?: boolean }]
+function styleInfoSheet(sheet, title, sections) {
+  sheet.columns = [{ width: 3 }, { width: 92 }];
+  let r = 1;
+
+  sheet.mergeCells(r, 1, r, 2);
+  const titleCell = sheet.getCell(r, 1);
+  titleCell.value = title;
+  titleCell.font = { bold: true, size: 15, color: { argb: 'FFFFFFFF' } };
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_STYLE.brand } };
+  titleCell.alignment = { vertical: 'middle', indent: 1 };
+  sheet.getRow(r).height = 30;
+  r += 2; // 빈 줄
+
+  sections.forEach(sec => {
+    sheet.mergeCells(r, 1, r, 2);
+    const headCell = sheet.getCell(r, 1);
+    headCell.value = `${sec.icon}  ${sec.heading}`;
+    headCell.font = { bold: true, size: 12, color: { argb: XLSX_STYLE.brandDark } };
+    headCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_STYLE.brandLight } };
+    headCell.alignment = { vertical: 'middle', indent: 1 };
+    headCell.border = { bottom: { style: 'thin', color: { argb: XLSX_STYLE.brand } } };
+    sheet.getRow(r).height = 22;
+    r++;
+
+    sec.items.forEach(item => {
+      sheet.mergeCells(r, 1, r, 2);
+      const cell = sheet.getCell(r, 1);
+      cell.value = item;
+      cell.font = { size: 11, color: { argb: 'FF333333' } };
+      cell.alignment = { vertical: 'middle', indent: 2, wrapText: true };
+      if (sec.tip) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_STYLE.tipBg } };
+      sheet.getRow(r).height = 18;
+      r++;
+    });
+    r++; // 섹션 사이 빈 줄
+  });
+}
+
+// 데이터 시트 헤더 행(브랜드 블루 배경 + 흰 글씨) 스타일 + 헤더 행 틀고정.
+function styleDataSheetHeader(ws, headerRowNum = 1) {
+  const row = ws.getRow(headerRowNum);
+  row.eachCell(cell => {
+    cell.font = { bold: true, size: 11, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XLSX_STYLE.brand } };
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = { bottom: { style: 'medium', color: { argb: XLSX_STYLE.brandDark } } };
+  });
+  row.height = 22;
+  ws.views = [{ state: 'frozen', ySplit: headerRowNum }];
+}
+
+// 데이터 영역(rowStart~rowEnd, 1~colCount열)에 옅은 그리드 테두리를 입혀 표처럼 보이게 한다.
+function applyGridBorder(ws, rowStart, rowEnd, colCount) {
+  for (let r = rowStart; r <= rowEnd; r++) {
+    for (let c = 1; c <= colCount; c++) {
+      ws.getCell(r, c).border = {
+        top: { style: 'thin', color: { argb: XLSX_STYLE.border } },
+        left: { style: 'thin', color: { argb: XLSX_STYLE.border } },
+        bottom: { style: 'thin', color: { argb: XLSX_STYLE.border } },
+        right: { style: 'thin', color: { argb: XLSX_STYLE.border } },
+      };
+    }
+  }
 }
 
 // ==================== EXCEL 양식 다운로드 (ExcelJS - 드롭다운 포함) ====================
@@ -4289,45 +4362,47 @@ async function downloadExcelTemplate() {
 
     // 안내 시트
     const infoSheet = wb.addWorksheet('안내');
-    infoSheet.columns = [{ width: 90 }];
-    const infoLines = [
-      '■ 고객사데이터 시트 작성 안내',
-      '',
-      '· 고객사명 : 필수. 같은 고객사명을 쓴 행은 자동으로 하나의 고객사로 묶입니다.',
-      '· 주소가 여러 곳이면, 같은 고객사명으로 행을 추가해 한 줄에 주소 1개씩 입력하세요.',
-      '· 컨택이력도 여러 건이면 같은 방식으로 행을 추가하세요. (주소칸은 비워두고 컨택날짜만 입력해도 됩니다)',
-      '· 소유자 : 태일 또는 정열. 비워두면 현재 로그인한 사용자로 등록됩니다.',
-      '· 분류 / 컨택유형 : 드롭다운 화살표를 눌러 목록에서 선택하세요 (오기입 방지).',
-      '· 컨택날짜 형식 : YYYY-MM-DD (예: 2026-06-19)',
-    ];
-    infoLines.forEach((line, i) => {
-      const cell = infoSheet.getCell(i + 1, 1);
-      cell.value = line;
-      if (i === 0) cell.font = { bold: true, size: 13 };
-    });
+    styleInfoSheet(infoSheet, '📋 고객사 등록 양식 작성 안내', [
+      {
+        icon: '✅', heading: '필수 항목', items: [
+          '고객사명 — 필수. 같은 고객사명을 쓴 행은 자동으로 하나의 고객사로 묶입니다.',
+        ]
+      },
+      {
+        icon: 'ℹ️', heading: '선택 항목', items: [
+          '소유자 — 태일 또는 정열. 비워두면 현재 로그인한 사용자로 등록됩니다.',
+          '분류 — 드롭다운에서 선택. 비워두면 미분류로 등록됩니다.',
+          '메모 — 자유 입력.',
+          '담당자명 / 담당자 전화번호 — 해당 주소를 담당하는 사람 정보. 없으면 비워두세요.',
+          '주소구분 / 주소 / 상세주소 — 예) 본사, 공장 등.',
+        ]
+      },
+      {
+        icon: '💡', heading: '작성 팁', tip: true, items: [
+          '주소가 여러 곳이면, 같은 고객사명으로 행을 추가해 한 줄에 주소 1개씩 입력하세요.',
+          '분류는 드롭다운 화살표를 눌러 목록에서 선택하세요 (오기입 방지).',
+          '컨택이력(방문/전화/메시지 기록)은 등록 후 지도 앱에서 고객사별로 추가할 수 있습니다.',
+        ]
+      },
+    ]);
 
     // 데이터 시트
     const ws = wb.addWorksheet('고객사데이터');
-    const headers = ['고객사명', '소유자', '분류', '메모', '담당자명', '연락처', '주소구분', '주소', '상세주소', '컨택날짜', '컨택유형', '컨택메모'];
-    ws.columns = headers.map(h => ({ header: h, key: h, width: h === '메모' || h === '컨택메모' || h === '주소' ? 28 : 14 }));
-    ws.getRow(1).font = { bold: true };
-    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E9F2' } };
+    const headers = ['고객사명', '소유자', '분류', '메모', '담당자명', '담당자 전화번호', '주소구분', '주소', '상세주소'];
+    ws.columns = headers.map(h => ({ header: h, key: h, width: h === '메모' || h === '주소' ? 28 : 14 }));
+    styleDataSheetHeader(ws);
 
     const catNames = categories.map(c => c.name).filter(Boolean);
     const catList = '"' + catNames.join(',') + '"';
-    const typeList = '"방문,전화,메시지"';
 
     const colIndex = (name) => headers.indexOf(name) + 1; // 1-based
 
     const ROWS = 50;
+    applyGridBorder(ws, 2, ROWS + 1, headers.length);
     for (let r = 2; r <= ROWS + 1; r++) {
       ws.getCell(r, colIndex('분류')).dataValidation = {
         type: 'list', allowBlank: true, formulae: [catList],
         showErrorMessage: true, errorTitle: '분류 오류', error: '목록에 있는 분류명만 선택할 수 있습니다.'
-      };
-      ws.getCell(r, colIndex('컨택유형')).dataValidation = {
-        type: 'list', allowBlank: true, formulae: [typeList],
-        showErrorMessage: true, errorTitle: '컨택유형 오류', error: '방문/전화/메시지 중에서 선택할 수 있습니다.'
       };
     }
 
@@ -4336,7 +4411,7 @@ async function downloadExcelTemplate() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = '고객사_일괄등록_양식.xlsx';
+    a.download = '고객사 등록 양식.xlsx';
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -4348,201 +4423,22 @@ async function downloadExcelTemplate() {
   }
 }
 
-// ==================== EXCEL 일괄 가져오기 ====================
-async function handleExcelImport(e) {
-  const file = e.target.files[0];
-  if (!file) return;
-  e.target.value = ''; // 같은 파일 다시 선택 가능하도록 초기화
-
-  closeAllSheets();
-  setTimeout(() => openSheet('excel-import-sheet'), 150);
-  document.getElementById('excel-import-body').innerHTML = '<div class="empty-state"><div>📥</div>엑셀 파일 읽는 중...</div>';
-
-  const reader = new FileReader();
-  reader.onload = async (ev) => {
-    try {
-      const wb = XLSX.read(ev.target.result, { type: 'array', cellDates: true });
-      const sheetName = wb.SheetNames.find(n => n.includes('고객사')) || wb.SheetNames[0];
-      const sheet = wb.Sheets[sheetName];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
-
-      if (rows.length === 0) {
-        document.getElementById('excel-import-body').innerHTML = '<div class="empty-state"><div>📭</div>읽을 데이터가 없습니다</div>';
-        return;
-      }
-
-      await processExcelImport(rows);
-    } catch (err) {
-      console.error('excel parse error', err);
-      document.getElementById('excel-import-body').innerHTML = `<div class="empty-state"><div>⚠️</div>엑셀 파일을 읽을 수 없습니다<br><small style="margin-top:6px;display:block;color:var(--text2);">${err.message}</small></div>`;
-    }
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-async function processExcelImport(rows) {
-  // 컬럼명 후보 매핑 (양식이 약간 달라도 인식되도록)
-  const getCol = (row, names) => {
-    for (const n of names) {
-      if (row[n] !== undefined && row[n] !== '') return String(row[n]).trim();
-    }
-    return '';
-  };
-
-  // 같은 고객사명끼리 묶기 (행마다 주소 1개씩 = 여러 행이 한 고객사일 수 있음)
-  const grouped = {};
-  const order = [];
-  rows.forEach(row => {
-    const name = getCol(row, ['고객사명', '회사명', '상호명']);
-    if (!name) return;
-    if (!grouped[name]) { grouped[name] = []; order.push(name); }
-    grouped[name].push(row);
-  });
-
-  if (order.length === 0) {
-    document.getElementById('excel-import-body').innerHTML = '<div class="empty-state"><div>📭</div>고객사명이 있는 행이 없습니다</div>';
-    return;
-  }
-
-  const total = order.length;
-  let done = 0;
-  const geocodeFailed = [];
-  const typeSkipped = [];
-  const newCustomers = [];
-
-  for (const name of order) {
-    const groupRows = grouped[name];
-    document.getElementById('excel-import-body').innerHTML =
-      `<div class="empty-state"><div>📥</div>처리 중... (${done+1}/${total})<br><small style="margin-top:6px;display:block;color:var(--text2);">${name}</small></div>`;
-
-    const first = groupRows[0];
-    const ownerRaw = getCol(first, ['소유자', '담당', '영업담당']);
-    const owner = (ownerRaw === '정열' || ownerRaw === '태일') ? ownerRaw : (currentUser || '태일');
-
-    const catName = getCol(first, ['분류']);
-    let categoryId = UNCATEGORIZED_ID;
-    if (catName) {
-      const matched = categories.find(c => c.name === catName);
-      if (matched) categoryId = matched.id;
-    }
-
-    const memo = getCol(first, ['메모', '비고']);
-
-    // 주소 + 컨택이력 + 담당자 - 한 행 안에서 같이 처리한다.
-    // 같은 행에 주소가 있으면, 그 행의 컨택이력/담당자는 그 주소 전용으로 연결한다.
-    // 주소가 비어있는 행의 컨택이력/담당자는 고객사 전체 공용(addressId 없음)으로 처리한다.
-    const TYPE_MAP = { '방문': 'visit', '전화': 'call', '메시지': 'sms', '문자': 'sms' };
-    const addresses = [];
-    const logs = [];
-    const contactsMap = {}; // 같은 이름+전화는 중복 제거
-    for (const r of groupRows) {
-      const addrLabel = getCol(r, ['주소구분', '구분']);
-      const addrText = getCol(r, ['주소']);
-      const addrDetail = getCol(r, ['상세주소', '상세']);
-
-      let addrId = null;
-      if (addrText) {
-        let lat = null, lng = null;
-        try {
-          const geo = await geocodeAddress(addrText);
-          if (geo) { lat = geo.lat; lng = geo.lng; }
-          else geocodeFailed.push({ name, address: addrText });
-        } catch {
-          geocodeFailed.push({ name, address: addrText });
-        }
-        addrId = 'addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
-        addresses.push({ id: addrId, label: addrLabel, address: addrText, detail: addrDetail, lat, lng });
-      }
-
-      const cName = getCol(r, ['담당자명', '담당자']);
-      const cPhone = getCol(r, ['연락처', '전화번호']);
-      if (cName || cPhone) {
-        const key = cName + '|' + cPhone + '|' + (addrId || '공용');
-        contactsMap[key] = { name: cName, phone: cPhone, addressId: addrId };
-      }
-
-      const logDateRaw = getCol(r, ['컨택날짜']);
-      if (logDateRaw) {
-        let logDate = logDateRaw;
-        // 엑셀 날짜가 Date객체/일련번호로 들어오는 경우 YYYY-MM-DD로 변환
-        if (r['컨택날짜'] instanceof Date) {
-          logDate = r['컨택날짜'].toISOString().slice(0, 10);
-        } else if (/^\d{4}-\d{2}-\d{2}/.test(logDateRaw)) {
-          logDate = logDateRaw.slice(0, 10);
-        }
-        const typeRaw = getCol(r, ['컨택유형']);
-        const logType = TYPE_MAP[typeRaw];
-        const logMemo = getCol(r, ['컨택메모']);
-        if (!logType) {
-          typeSkipped.push({ name, date: logDate, memo: logMemo });
-        } else {
-          logs.push({ type: logType, date: logDate, memo: logMemo, addressId: addrId });
-        }
-      }
-    }
-
-    const firstAddr = addresses.find(a => a.lat);
-    const contacts = Object.values(contactsMap);
-
-    newCustomers.push({
-      id: 'cst_' + Date.now() + '_' + Math.floor(Math.random()*1000),
-      name, category: categoryId, memo, contacts, addresses,
-      lat: firstAddr ? firstAddr.lat : null,
-      lng: firstAddr ? firstAddr.lng : null,
-      owner,
-      logs,
-      createdAt: new Date().toISOString()
-    });
-
-    done++;
-  }
-
-  customers = customers.concat(newCustomers);
-  document.getElementById('excel-import-body').innerHTML = '<div class="empty-state"><div>💾</div>저장 중...</div>';
-  await saveData();
-  renderAllMarkers();
-  renderListBody();
-
-  // 결과 화면
-  const totalLogs = newCustomers.reduce((sum, c) => sum + c.logs.length, 0);
-  let resultHtml = `<div style="padding:8px 0;">
-    <div style="font-size:14px; font-weight:700; margin-bottom:4px;">✅ ${newCustomers.length}개 고객사 추가 완료</div>
-    <div style="font-size:12px; color:var(--text2); margin-bottom:12px;">컨택이력 ${totalLogs}건 포함 · 저장이 확인되었습니다</div>`;
-
-  if (geocodeFailed.length > 0) {
-    resultHtml += `<div class="section-divider">⚠️ 주소 변환 실패 (${geocodeFailed.length}건)</div>
-      <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">아래 주소는 지도에 핀이 표시되지 않습니다. 고객사 수정 화면에서 주소를 다시 검색해주세요.</div>`;
-    geocodeFailed.forEach(f => {
-      resultHtml += `<div class="contact-row"><div><div style="font-weight:600;font-size:13px;">${f.name}</div><div style="font-size:12px;color:var(--text2);">${f.address}</div></div></div>`;
-    });
-  }
-
-  if (typeSkipped.length > 0) {
-    resultHtml += `<div class="section-divider">⚠️ 컨택유형 미상으로 건너뜀 (${typeSkipped.length}건)</div>
-      <div style="font-size:12px; color:var(--text2); margin-bottom:8px;">컨택유형이 방문/전화/메시지 중 하나로 명확하지 않아 등록하지 않았습니다. 원본 엑셀에서 컨택유형을 채운 뒤 다시 가져와주세요.</div>`;
-    typeSkipped.forEach(t => {
-      resultHtml += `<div class="contact-row"><div><div style="font-weight:600;font-size:13px;">${t.name}</div><div style="font-size:12px;color:var(--text2);">${t.date}${t.memo ? ' · ' + t.memo : ''}</div></div></div>`;
-    });
-  }
-
-  resultHtml += `<button class="submit-btn" onclick="closeAllSheets()" style="margin-top:16px;">확인</button>`;
-  document.getElementById('excel-import-body').innerHTML = resultHtml;
-  showToast('가져오기 완료');
-}
-
-// ==================== 고객사 데이터 내보내기 + 재가져오기(수정용, 작업 D 2026-07) ====================
-// 기존 "고객사 일괄 가져오기"(신규 추가 전용, 미리보기 없음)와 별개의 흐름.
-// 이미 등록된 고객사를 엑셀로 내보내 수정한 뒤, ID 기반으로 매칭해 추가/수정/삭제 후보를
-// 미리보기로 보여주고 사용자가 확인·선택한 것만 반영한다. 삭제는 기존 deleteCustomer()와
-// 동일하게 markDeleted()+trash[] 소프트 삭제로만 처리(하드 삭제 없음). 로그/좌표/생성일은
-// 매칭된 레코드에서 건드리지 않는다. 지도앱의 customers[]/addresses[] 스키마 자체는 바꾸지
-// 않는다 — ID/체크섬/메타시트는 전부 엑셀 파일 안에만 존재하는 임시 정보.
+// ==================== 고객사 데이터 가져오기/내보내기 (작업 D/F 2026-07) ====================
+// 엑셀 양식 다운로드(신규 시작용, 빈 양식)/고객사 데이터 내보내기(기존 수정용, ID 채워진 양식)로
+// 만든 파일을 하나의 "가져오기" 흐름(handleReimportFile)으로 불러온다. ID 기반으로 매칭해
+// 추가/수정/삭제 후보를 미리보기로 보여주고 사용자가 확인·선택한 것만 반영한다. 삭제는 기존
+// deleteCustomer()와 동일하게 markDeleted()+trash[] 소프트 삭제로만 처리(하드 삭제 없음).
+// 로그/좌표/생성일은 매칭된 레코드에서 건드리지 않는다. 지도앱의 customers[]/addresses[]
+// 스키마 자체는 바꾸지 않는다 — ID/체크섬/메타시트는 전부 엑셀 파일 안에만 존재하는 임시 정보.
 //
 // 동시 편집 대응: "삭제 후보"는 라이브 데이터가 아니라 "_메타"(veryHidden) 시트에 기록된
 // 내보내기 시점 스냅샷 기준으로만 판단한다 — 내보내기 이후 다른 사람이 추가한 데이터는
 // 애초에 메타 스냅샷에 없으므로 삭제 후보에 절대 안 들어간다. 각 행의 "_체크섬"(고객사 필드
 // + 그 행의 주소 필드를 합친 해시, 암호학적 용도 아님 - 순수 변경감지용)으로 "라이브 데이터가
 // 내보내기 이후 이미 바뀌었는지"를 감지해 "충돌"로 분리하고 자동으로 덮어쓰지 않는다.
+// "_메타" 시트가 없는 파일(엑셀 양식 다운로드로 받은 빈 양식을 처음 채운 경우)은 삭제 후보
+// 판정을 건너뛰고 추가/수정만 처리한다 — computeReimportDiff에 빈 metaRows를 넘기면
+// 자동으로 그렇게 동작한다(삭제 후보는 전부 metaRows 기준으로만 계산되므로).
 
 function _simpleChecksum(value) {
   const str = JSON.stringify(value);
@@ -4757,31 +4653,36 @@ async function exportCustomerDataForEdit() {
     const wb = new ExcelJS.Workbook();
 
     const infoSheet = wb.addWorksheet('안내');
-    infoSheet.columns = [{ width: 90 }];
-    const infoLines = [
-      '■ 고객사데이터(수정용) 내보내기 안내',
-      '',
-      '· 이 파일은 "재가져오기(수정용)"으로만 다시 불러올 수 있습니다(일반 "엑셀 가져오기"와 다른 파일입니다).',
-      '· 숨겨진 열(고객사ID/주소ID/체크섬)은 지우거나 값을 바꾸지 마세요 — 어떤 데이터인지 알아보는 용도입니다.',
-      '· 행을 지우면 "삭제 예정"으로, 새 행을 추가하면 "추가 예정"으로 미리보기에 나타납니다. 실제 반영 전에 항상 확인할 수 있습니다.',
-      '· 값만 바꾸면 "수정 예정"으로 나타납니다. 완전히 같은 값이면 미리보기에 나타나지 않습니다.',
-      `· 내보낸 시각: ${new Date().toLocaleString('ko-KR')}`,
-    ];
-    infoLines.forEach((line, i) => {
-      const cell = infoSheet.getCell(i + 1, 1);
-      cell.value = line;
-      if (i === 0) cell.font = { bold: true, size: 13 };
-    });
+    styleInfoSheet(infoSheet, '📤 고객사 데이터(수정용) 내보내기 안내', [
+      {
+        icon: '📖', heading: '사용 방법', items: [
+          '값을 수정한 뒤 저장하고, 지도 앱의 "가져오기" 버튼으로 이 파일을 업로드하세요.',
+        ]
+      },
+      {
+        icon: '⚠️', heading: '주의 사항', items: [
+          '숨겨진 열(고객사ID/주소ID/체크섬)은 지우거나 값을 바꾸지 마세요 — 어떤 데이터인지 알아보는 용도입니다.',
+          '행을 지우면 "삭제 예정"으로 미리보기에 나타납니다. 실제 반영 전에 항상 확인할 수 있습니다.',
+        ]
+      },
+      {
+        icon: '💡', heading: '작성 팁', tip: true, items: [
+          '새 행을 추가하면 "추가 예정"으로 나타납니다.',
+          '값만 바꾸면 "수정 예정"으로 나타납니다. 완전히 같은 값이면 미리보기에 나타나지 않습니다.',
+          `내보낸 시각: ${new Date().toLocaleString('ko-KR')}`,
+        ]
+      },
+    ]);
 
     const ws = wb.addWorksheet('고객사데이터');
     const headers = ['고객사명', '소유자', '분류', '메모', '주소구분', '주소', '상세주소', '담당자명', '담당자 전화번호', '_고객사ID', '_주소ID', '_체크섬'];
     ws.columns = headers.map(h => ({ header: h, key: h, width: (h === '메모' || h === '주소') ? 28 : 14 }));
-    ws.getRow(1).font = { bold: true };
-    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5E9F2' } };
+    styleDataSheetHeader(ws);
     ['_고객사ID', '_주소ID', '_체크섬'].forEach(h => { ws.getColumn(headers.indexOf(h) + 1).hidden = true; });
 
     const { rowsOut, metaRows } = buildExportRows(customers, categories);
     rowsOut.forEach(r => ws.addRow(r));
+    applyGridBorder(ws, 2, rowsOut.length + 1, headers.length);
 
     // 숨김 메타 시트(veryHidden - 엑셀 UI에서 우클릭으로도 숨김 해제 안 됨): 내보내기 시점
     // 전체 (고객사ID, 주소ID) 스냅샷. 재가져오기 시 "삭제 후보" 판단 기준이 됨(동시편집 대응).
@@ -4800,7 +4701,7 @@ async function exportCustomerDataForEdit() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    showToast(`내보내기 완료 (${customers.length}개 고객사) — 수정 후 "재가져오기(수정용)"으로 불러오세요`);
+    showToast(`내보내기 완료 (${customers.length}개 고객사) — 수정 후 "가져오기"로 불러오세요`);
   } catch (err) {
     console.error('export for edit error', err);
     showToast('내보내기 중 오류가 발생했습니다');
@@ -4823,19 +4724,16 @@ async function handleReimportFile(e) {
       const mainSheetName = wb.SheetNames.find(n => n.includes('고객사')) || wb.SheetNames[0];
       const mainRows = XLSX.utils.sheet_to_json(wb.Sheets[mainSheetName], { defval: '' });
 
-      const metaSheet = wb.Sheets['_메타'];
-      if (!metaSheet) {
-        document.getElementById('reimport-body').innerHTML =
-          '<div class="empty-state"><div>⚠️</div>이 파일은 "재가져오기(수정용)" 형식이 아닙니다<br>' +
-          '<small style="margin-top:6px;display:block;color:var(--text2);">"고객사 데이터 내보내기(수정용)"로 받은 파일만 재가져오기 할 수 있습니다.</small></div>';
-        return;
-      }
-      const metaRows = XLSX.utils.sheet_to_json(metaSheet, { defval: '' });
-
       if (mainRows.length === 0) {
         document.getElementById('reimport-body').innerHTML = '<div class="empty-state"><div>📭</div>읽을 데이터가 없습니다</div>';
         return;
       }
+
+      // "_메타" 시트가 없는 파일(엑셀 양식 다운로드로 받은 빈 양식을 처음 채운 경우)은
+      // 삭제 후보 판정 없이 추가/수정만 처리한다 - computeReimportDiff에 빈 배열을 넘기면
+      // (삭제 후보는 metaRows 기준으로만 계산되므로) 자동으로 그렇게 동작한다.
+      const metaSheet = wb.Sheets['_메타'];
+      const metaRows = metaSheet ? XLSX.utils.sheet_to_json(metaSheet, { defval: '' }) : [];
 
       const diff = computeReimportDiff(mainRows, metaRows, customers, categories);
       window._reimportState = { mainRows, metaRows };
@@ -5094,7 +4992,7 @@ async function applyReimportChanges() {
   }
   summary += `<button class="submit-btn" onclick="closeAllSheets()" style="margin-top:16px;">확인</button>`;
   document.getElementById('reimport-body').innerHTML = summary;
-  showToast('재가져오기 반영 완료');
+  showToast('가져오기 반영 완료');
 }
 
 // ==================== DRAG SCROLL (마우스로 가로 스크롤) ====================
@@ -5574,7 +5472,7 @@ function toggleRoutePanel() {
       gpsBtn.title = 'PC에서는 현위치 정확도가 낮아 사용할 수 없습니다';
       if (customOrigin === null) {
         // PC 첫 진입 시 자동으로 직접입력 탭으로 전환 권장 안내만 표시
-        document.getElementById('origin-label').textContent = 'PC에서는 현위치를 사용할 수 없습니다. 고객사 또는 직접입력을 선택하세요';
+        document.getElementById('origin-label').textContent = '고객사 또는 직접입력을 선택하세요';
         document.getElementById('origin-label').style.color = 'var(--warning)';
       }
     } else {

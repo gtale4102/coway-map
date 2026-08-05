@@ -63,6 +63,23 @@
 
 customer 데이터 구조(v5.00 이후 고정): `{ id, name, category, memo, addresses: [{id, label, address, detail, lat, lng, contactName, contactPhone}], lat, lng, owner('태일'|'정열'), logs: [...], createdAt }`. 담당자는 **주소마다 1명**이며, 과거 있던 고객사 레벨의 공용 `contacts[]` 배열은 v5.00에서 완전히 제거되고 `addresses[].contactName/contactPhone`로 통합됨(레거시 레코드는 로드 시 자동 마이그레이션).
 
+### 파일 구성
+
+| 파일 | 역할 |
+|---|---|
+| `index.html` | **앱 본체.** HTML+CSS+JS 한 파일(약 6,400행, 프레임워크 없음) |
+| `apps-script/Code.js` | **Google Sheets 저장 엔드포인트 본체.** `doGet`(조회·토큰 검증) / `doPost`(전체 저장 `handleFullSave_`, 컨택이력 1건 추가 `handleAppendLogData_`). **문자발송 프로젝트가 읽는 것이 바로 이 엔드포인트다**(ARCHITECTURE 2-4) |
+| `apps-script/appsscript.json` · `.clasp.json` | Apps Script 매니페스트·clasp 배포 설정 |
+| `icon-192.png` · `icon-512.png` | 파비콘·홈화면 아이콘 (`index.html`이 `rel="icon"`/`apple-touch-icon`으로 직접 참조. 별도 `manifest.json`은 **없다**) |
+| `dulcet-medley-...json` | Google 서비스 계정 키 — **`.gitignore`로 git 제외**. 이 앱 자체의 구글 클라우드 프로젝트 인증 파일이며 다른 프로젝트와 무관하다 |
+| `CNAME` | GitHub Pages 커스텀 도메인 (`map.b2bc-coway.com`) |
+| `고객사_일괄등록_양식.xlsx` · `고객사목록_양식.xlsx` | 고객사 일괄 등록·목록 입력 양식 |
+| `render*.png` | 렌더 비교용 스크린샷(v2.92 / v3.00) |
+| `handover-coway-SKILL.md` | **claude.ai 스킬 정의.** "인수인계 준비해줘"·"새 채팅창으로 넘어갈게" 등에 반응해 인수인계 문서를 자동 생성한다 |
+| `README.md` | GitHub 저장소 표시용(내용은 제목 한 줄뿐) |
+
+**`apps-script/Code.js` 는 이 저장소의 사본이고 실제로 도는 것은 Google Apps Script 쪽에 배포된 코드다** — 한쪽만 고치면 어긋난다.
+
 ## 핵심 규칙
 
 **불확실한 건 임의로 해석해서 코드에 넣지 말 것. 확인이 필요하면 먼저 물어볼 것.** 특히 삭제를 수반하는 로직이나 스키마 변경은 반드시 설계안을 먼저 보고하고 승인받은 뒤 구현한다.

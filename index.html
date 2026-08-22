@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.56</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.57</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -5277,6 +5277,12 @@ async function applyReimportChanges() {
   const skipped = [];
   let addedCount = 0, addedAddrCount = 0, modifiedCount = 0, deletedAddrCount = 0, deletedCustCount = 0, addedLogCount = 0, mergedCount = 0;
 
+  // 고객사 최상위 lat/lng(대표 좌표)을 다시 잡아야 하는 고객사 id 모음(v5.56 삭제 → v5.57 확장).
+  // 주소가 삭제·수정·추가·병합 중 하나라도 되면 여기 담고, 모든 처리 루프가 끝난 뒤 아래에서
+  // 고객사당 딱 한 번 재계산한다. 각 지점에서 따로 재계산하지 않는 이유는, 한 고객사에
+  // 삭제+수정+추가가 동시에 걸릴 수 있어 중간 상태로 계산하면 틀리기 때문이다.
+  const coordAffectedCustIds = new Set();
+
   // 신규 고객사 추가
   for (const c of freshDiff.addedCustomers) {
     const key = _reimportItemKey('added', c);
@@ -5322,6 +5328,7 @@ async function applyReimportChanges() {
       const newLogs = _buildLogsForNewAddresses(c.logs, newAddresses);
       target.addresses = (target.addresses || []).concat(newAddresses);
       target.logs = (target.logs || []).concat(newLogs);
+      coordAffectedCustIds.add(target.id);
       addedAddrCount += newAddresses.length;
       addedLogCount += newLogs.length;
       mergedCount++;
@@ -5361,6 +5368,8 @@ async function applyReimportChanges() {
       addedAddrCount++;
     }
 
+    if (c.modifiedAddresses.length > 0 || c.addedAddresses.length > 0) coordAffectedCustIds.add(target.id);
+
     // 컨택이력 추가 - 기존 이력은 절대 건드리지 않고 새 이력만 누적(logs[]에 push)
     for (const l of (c.addedLogs || [])) {
       target.logs = target.logs || [];
@@ -5397,12 +5406,12 @@ async function applyReimportChanges() {
       if (a.address) { try { const geo = await geocodeAddress(a.address); if (geo) { lat = geo.lat; lng = geo.lng; } } catch (e) {} }
       target.addresses.push({ id: 'addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), label: a.label, address: a.address, detail: a.detail, contactName: a.contactName, contactPhone: a.contactPhone, lat, lng });
     }
+    if (c.modifiedAddresses.length > 0 || c.addedAddresses.length > 0) coordAffectedCustIds.add(target.id);
     modifiedCount++;
   }
 
   // 주소 삭제 - 독립 항목이므로 체크된 것만 실행한다(v5.55). 휴지통 경로가 없어 되돌릴 수 없다.
   // customerChanges/conflicts 어느 쪽에서 온 삭제든 전부 이 한 지점을 거친다.
-  const addrDeletedCustIds = new Set();
   for (const a of freshDiff.addressDeletions) {
     const key = _reimportItemKey('addrDeleted', a);
     if (!checkedKeys.addrDeleted.has(key)) continue;
@@ -5410,16 +5419,17 @@ async function applyReimportChanges() {
     if (!target) { skipped.push(`'${a.customerName}'의 주소 '${a.label}' — 반영 직전 다시 확인한 결과 고객사가 이미 없어져 건너뜀`); continue; }
     const before = (target.addresses || []).length;
     target.addresses = (target.addresses || []).filter(x => x.id !== a.addressId);
-    if (target.addresses.length < before) { deletedAddrCount++; addrDeletedCustIds.add(a.customerId); }
+    if (target.addresses.length < before) { deletedAddrCount++; coordAffectedCustIds.add(a.customerId); }
   }
 
-  // 주소를 지웠으면 고객사 대표 좌표(lat/lng)를 남은 주소 기준으로 다시 잡는다(v5.56).
-  // splitAddress()와 동일한 패턴. 이 필드는 addresses[]와 별개로 남아 있는 옛 구조라, 그대로 두면
-  // 지워진 주소의 옛 좌표가 남아 "지도에서 보기"(moveToMarker)·검색 결과 이동(selectSearchResultAddr)·
-  // 로드뷰(openRoadview)가 엉뚱한 위치를 가리키고, 주소가 전부 없어진 경우엔 renderAllMarkers의
-  // 구버전 호환 경로가 그 좌표로 유령 핀을 그린다. null로 만들어두면 그쪽 조건이 알아서 걸러낸다.
-  // 고객사당 한 번만 계산한다(주소를 여러 개 지워도 중복 계산 없음).
-  addrDeletedCustIds.forEach(custId => {
+  // 주소가 바뀐 고객사의 대표 좌표(lat/lng)를 남은 주소 기준으로 다시 잡는다(v5.56 삭제 → v5.57 확장:
+  // 삭제·수정·추가·병합 전부). splitAddress()와 동일한 패턴. 이 필드는 addresses[]와 별개로 남아 있는
+  // 옛 구조라, 그대로 두면 옛 좌표가 남아 "지도에서 보기"(moveToMarker)·검색 결과 이동
+  // (selectSearchResultAddr)·로드뷰(openRoadview)가 엉뚱한 위치를 가리키고, 주소가 전부 없어진
+  // 경우엔 renderAllMarkers의 구버전 호환 경로가 그 좌표로 유령 핀을 그린다. null로 만들어두면
+  // 그쪽 조건이 알아서 걸러낸다. 모든 처리 루프가 끝난 뒤 고객사당 딱 한 번만 계산한다 - 한 고객사에
+  // 삭제+수정+추가가 겹쳐도 최종 addresses[] 기준으로 한 번에 정확히 잡힌다.
+  coordAffectedCustIds.forEach(custId => {
     const target = customers.find(x => x.id === custId);
     if (!target) return;
     const firstAddr = (target.addresses || []).find(a => a.lat);

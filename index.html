@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.54</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.55</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -4555,6 +4555,13 @@ function applyGroupDividers(ws, rowStart, rowEnd, afterCols, colorArgb) {
 //     비면 고객사 전체가 삭제 후보. remainingAddrIdsForCust/remainingCustIds 계산에 자연스럽게
 //     흡수시켜 "행이 없어짐" 케이스와 동일한 경로로 처리한다.
 //
+// 주소 삭제는 독립 항목으로 분리한다(v5.55). computeReimportDiff는 주소 삭제를
+// customerChanges/conflicts에 넣지 않고 result.addressDeletions[]에 "고객사 하나의 주소 하나"
+// 단위로 담고, 미리보기는 이를 전용 섹션에 **기본 미체크**로 띄운다. 이유: 고객사 전체 삭제는
+// 휴지통(복원 가능)으로 가지만 주소 삭제는 복원 경로가 없어서, 무해한 필드 수정과 같은
+// 체크박스에 묶여 기본 체크로 실행되면 되돌릴 수 없기 때문. 충돌(addrConflicts) 케이스에서도
+// 똑같이 분리한다 - 삭제는 충돌 여부와 무관하게 항상 되돌릴 수 없는 동작이므로.
+//
 // 이름 중복 감지("신규 추가" 시트 전용): 앞뒤 공백만 다른 이름도 같은 이름으로 판단해 기존
 // 고객사와 겹치면 "이름 중복" 그룹으로 분류하고, 사용자가 "그래도 새 고객사로 추가" /
 // "기존 고객사에 이 주소만 추가" 중 선택한다(기본값은 둘 다 아님 - 안전 우선).
@@ -4703,7 +4710,7 @@ function computeReimportDiff(existingRows, metaRows, newRows, liveCustomers, liv
   const remainingCustIds = new Set();
   const byExistingId = new Map();
 
-  const result = { addedCustomers: [], customerChanges: [], deletedCustomers: [], conflicts: [], nameConflicts: [], warnings: [] };
+  const result = { addedCustomers: [], customerChanges: [], deletedCustomers: [], addressDeletions: [], conflicts: [], nameConflicts: [], warnings: [] };
 
   existingRows.forEach(row => {
     const custId = (row['_고객사ID'] || '').toString().trim();
@@ -4848,16 +4855,23 @@ function computeReimportDiff(existingRows, metaRows, newRows, liveCustomers, liv
         return { addressId: id, label: a.label || a.address || id };
       });
 
+    // 주소 삭제는 충돌 여부와 무관하게 항상 독립 항목으로 뺀다(v5.55) - 위 주석 참고.
+    // 그래서 anyChange 판정에서도 제외한다: 주소 삭제만 있는 고객사는 "수정 예정"에 뜨지 않고
+    // "주소 삭제 예정" 섹션에만 뜬다.
+    deletedAddresses.forEach(a => {
+      result.addressDeletions.push({ customerId: custId, customerName: live.name, addressId: a.addressId, label: a.label });
+    });
+
     const anyConflict = addrConflicts.length > 0;
-    const anyChange = Object.keys(custChanges).length > 0 || addedAddresses.length > 0 || modifiedAddresses.length > 0 || deletedAddresses.length > 0 || addedLogs.length > 0;
+    const anyChange = Object.keys(custChanges).length > 0 || addedAddresses.length > 0 || modifiedAddresses.length > 0 || addedLogs.length > 0;
 
     if (anyConflict) {
       result.conflicts.push({
         type: 'customer_partial_conflict', customerId: custId, customerName: live.name,
-        addrConflicts, custChanges, addedAddresses, modifiedAddresses, deletedAddresses,
+        addrConflicts, custChanges, addedAddresses, modifiedAddresses,
       });
     } else if (anyChange) {
-      result.customerChanges.push({ customerId: custId, customerName: live.name, custChanges, addedAddresses, modifiedAddresses, deletedAddresses, addedLogs });
+      result.customerChanges.push({ customerId: custId, customerName: live.name, custChanges, addedAddresses, modifiedAddresses, addedLogs });
     }
   });
 
@@ -5087,6 +5101,8 @@ async function handleReimportFile(e) {
 function _reimportItemKey(kind, item) {
   if (kind === 'added' || kind === 'nameConflict') return 'name:' + item.name;
   if (kind === 'changed' || kind === 'deleted') return item.customerId;
+  // 한 고객사에서 주소가 여러 개 삭제될 수 있으므로 고객사ID만으로는 유일하지 않다.
+  if (kind === 'addrDeleted') return item.customerId + '|' + item.addressId;
   if (kind === 'conflict') return item.customerId || ('name:' + item.customerName);
   return '';
 }
@@ -5144,7 +5160,6 @@ function renderReimportPreview(diff) {
       if (Object.keys(c.custChanges).length) parts.push(_fmtChanges(c.custChanges));
       c.addedAddresses.forEach(a => parts.push(`(신규 주소) ${a.label ? a.label + ': ' : ''}${a.address}`));
       c.modifiedAddresses.forEach(a => parts.push(_fmtChanges(a.changes)));
-      c.deletedAddresses.forEach(a => parts.push(`(주소 삭제) ${a.label}`));
       (c.addedLogs || []).forEach(l => parts.push(`(컨택이력 추가) ${l.date} ${REIMPORT_LOG_TYPE_LABEL[l.type] || l.type}${l.memo ? ': ' + l.memo : ''}`));
       const key = encodeURIComponent(_reimportItemKey('changed', c));
       html += `<label class="contact-row" style="cursor:pointer; align-items:flex-start;">
@@ -5156,8 +5171,22 @@ function renderReimportPreview(diff) {
     groups.push(html);
   }
 
+  // 주소 삭제 - 고객사 삭제(휴지통 O)와 달리 복원 경로가 없으므로 기본 미체크 + 경고 문구(v5.55)
+  if (diff.addressDeletions.length > 0) {
+    let html = `<div class="section-divider">🗑️ 주소 삭제 예정 (${diff.addressDeletions.length}건) — 확인 후 체크해야 반영됩니다</div>`;
+    diff.addressDeletions.forEach(a => {
+      const key = encodeURIComponent(_reimportItemKey('addrDeleted', a));
+      html += `<label class="contact-row" style="cursor:pointer; background:rgba(255,79,106,0.07);">
+        <input type="checkbox" class="reimport-check" data-kind="addrDeleted" data-key="${key}" style="margin-right:8px;">
+        <div><div style="font-weight:600;font-size:13px;">${a.customerName} — 주소 '${a.label}'</div>
+        <div style="font-size:12px;color:var(--danger);">휴지통 없음 · 삭제하면 복원할 수 없습니다</div></div>
+      </label>`;
+    });
+    groups.push(html);
+  }
+
   if (diff.deletedCustomers.length > 0) {
-    let html = `<div class="section-divider">🗑️ 삭제 예정 (${diff.deletedCustomers.length}건) — 확인 후 체크해야 반영됩니다</div>`;
+    let html = `<div class="section-divider">🗑️ 고객사 삭제 예정 (${diff.deletedCustomers.length}건) — 확인 후 체크해야 반영됩니다</div>`;
     diff.deletedCustomers.forEach(c => {
       const key = encodeURIComponent(_reimportItemKey('deleted', c));
       html += `<label class="contact-row" style="cursor:pointer;">
@@ -5185,7 +5214,7 @@ function renderReimportPreview(diff) {
     groups.push(html);
   }
 
-  if (diff.addedCustomers.length === 0 && diff.nameConflicts.length === 0 && diff.customerChanges.length === 0 && diff.deletedCustomers.length === 0 && diff.conflicts.length === 0) {
+  if (diff.addedCustomers.length === 0 && diff.nameConflicts.length === 0 && diff.customerChanges.length === 0 && diff.addressDeletions.length === 0 && diff.deletedCustomers.length === 0 && diff.conflicts.length === 0) {
     groups.push(`<div class="empty-state"><div>✅</div>변경할 내용이 없습니다<br><small style="margin-top:6px;display:block;color:var(--text2);">라이브 데이터와 완전히 동일합니다.</small></div>`);
   }
 
@@ -5222,7 +5251,7 @@ async function applyReimportChanges() {
   if (!state) return;
 
   const checks = Array.from(document.querySelectorAll('.reimport-check'));
-  const checkedKeys = { added: new Set(), changed: new Set(), deleted: new Set(), conflict: new Set() };
+  const checkedKeys = { added: new Set(), changed: new Set(), deleted: new Set(), addrDeleted: new Set(), conflict: new Set() };
   checks.forEach(chk => { if (chk.checked) checkedKeys[chk.dataset.kind].add(decodeURIComponent(chk.dataset.key)); });
 
   const ncChoices = new Map(); // key -> 'new' | 'merge' (제외는 아예 안 담김)
@@ -5230,7 +5259,7 @@ async function applyReimportChanges() {
     if (r.value !== 'skip') ncChoices.set(decodeURIComponent(r.dataset.key), r.value);
   });
 
-  const totalChecked = checkedKeys.added.size + checkedKeys.changed.size + checkedKeys.deleted.size + checkedKeys.conflict.size + ncChoices.size;
+  const totalChecked = checkedKeys.added.size + checkedKeys.changed.size + checkedKeys.deleted.size + checkedKeys.addrDeleted.size + checkedKeys.conflict.size + ncChoices.size;
   if (totalChecked === 0) { showToast('선택된 항목이 없습니다'); return; }
 
   document.getElementById('reimport-body').innerHTML = '<div class="empty-state"><div>🔄</div>최신 데이터 재확인 중...</div>';
@@ -5332,12 +5361,6 @@ async function applyReimportChanges() {
       addedAddrCount++;
     }
 
-    if (c.deletedAddresses.length > 0) {
-      const delIds = new Set(c.deletedAddresses.map(a => a.addressId));
-      target.addresses = (target.addresses || []).filter(a => !delIds.has(a.id));
-      deletedAddrCount += c.deletedAddresses.length;
-    }
-
     // 컨택이력 추가 - 기존 이력은 절대 건드리지 않고 새 이력만 누적(logs[]에 push)
     for (const l of (c.addedLogs || [])) {
       target.logs = target.logs || [];
@@ -5374,11 +5397,18 @@ async function applyReimportChanges() {
       if (a.address) { try { const geo = await geocodeAddress(a.address); if (geo) { lat = geo.lat; lng = geo.lng; } } catch (e) {} }
       target.addresses.push({ id: 'addr_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7), label: a.label, address: a.address, detail: a.detail, contactName: a.contactName, contactPhone: a.contactPhone, lat, lng });
     }
-    if (c.deletedAddresses.length > 0) {
-      const delIds = new Set(c.deletedAddresses.map(a => a.addressId));
-      target.addresses = (target.addresses || []).filter(a => !delIds.has(a.id));
-    }
     modifiedCount++;
+  }
+
+  // 주소 삭제 - 독립 항목이므로 체크된 것만 실행한다(v5.55). 휴지통 경로가 없어 되돌릴 수 없다.
+  for (const a of freshDiff.addressDeletions) {
+    const key = _reimportItemKey('addrDeleted', a);
+    if (!checkedKeys.addrDeleted.has(key)) continue;
+    const target = customers.find(x => x.id === a.customerId);
+    if (!target) { skipped.push(`'${a.customerName}'의 주소 '${a.label}' — 반영 직전 다시 확인한 결과 고객사가 이미 없어져 건너뜀`); continue; }
+    const before = (target.addresses || []).length;
+    target.addresses = (target.addresses || []).filter(x => x.id !== a.addressId);
+    if (target.addresses.length < before) deletedAddrCount++;
   }
 
   // 고객사 전체 삭제 - 기존 deleteCustomer()와 동일한 소프트 삭제(tombstone + 휴지통), 확인창은 이미 미리보기가 대신함

@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.57</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.58</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -5071,8 +5071,16 @@ async function handleReimportFile(e) {
       const existingSheetName = wb.SheetNames.find(n => n === '기존 고객사') || wb.SheetNames.find(n => n.includes('기존'));
       const newSheetName = wb.SheetNames.find(n => n === '신규 추가') || wb.SheetNames.find(n => n.includes('신규'));
 
-      const existingRows = existingSheetName ? XLSX.utils.sheet_to_json(wb.Sheets[existingSheetName], { defval: '' }) : [];
-      const newRows = newSheetName ? XLSX.utils.sheet_to_json(wb.Sheets[newSheetName], { defval: '' }) : [];
+      // raw: false - 셀에 적용된 서식대로 값을 문자열로 변환해 읽는다(v5.58). 컨택날짜 칸은
+      // 내보내기 때 numFmt 'yyyy-mm-dd'가 걸려 있어, 사용자가 "8-22"처럼 입력해 엑셀이 진짜 날짜
+      // 값으로 바꿔 저장해도 일련번호(46256) 대신 "2026-08-22" 문자열로 들어온다. 기본값(raw: true)
+      // 이면 그 일련번호가 뒤쪽 파싱(Date 체크/yyyy-mm-dd 정규식)을 모두 비껴가 경고 없이 그대로
+      // 컨택날짜로 저장됐다. 나머지 칸은 내보내기 때 전부 문자열로 쓰므로 영향이 없고, 사용자가
+      // 텍스트 칸에 숫자만 입력해 엑셀이 숫자 셀로 만든 경우(예: 전화번호)에도 값은 같은 자릿수
+      // 문자열로 들어온다 - 오히려 이전에는 그 number 값이 (r[...] || '').trim()에서 TypeError를
+      // 내 파일 전체가 '읽을 수 없습니다'로 실패했다.
+      const existingRows = existingSheetName ? XLSX.utils.sheet_to_json(wb.Sheets[existingSheetName], { defval: '', raw: false }) : [];
+      const newRows = newSheetName ? XLSX.utils.sheet_to_json(wb.Sheets[newSheetName], { defval: '', raw: false }) : [];
 
       if (existingRows.length === 0 && newRows.length === 0) {
         document.getElementById('reimport-body').innerHTML = '<div class="empty-state"><div>📭</div>읽을 데이터가 없습니다</div>';

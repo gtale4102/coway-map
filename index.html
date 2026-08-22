@@ -996,7 +996,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.55</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v5.56</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -5401,6 +5401,8 @@ async function applyReimportChanges() {
   }
 
   // 주소 삭제 - 독립 항목이므로 체크된 것만 실행한다(v5.55). 휴지통 경로가 없어 되돌릴 수 없다.
+  // customerChanges/conflicts 어느 쪽에서 온 삭제든 전부 이 한 지점을 거친다.
+  const addrDeletedCustIds = new Set();
   for (const a of freshDiff.addressDeletions) {
     const key = _reimportItemKey('addrDeleted', a);
     if (!checkedKeys.addrDeleted.has(key)) continue;
@@ -5408,8 +5410,22 @@ async function applyReimportChanges() {
     if (!target) { skipped.push(`'${a.customerName}'의 주소 '${a.label}' — 반영 직전 다시 확인한 결과 고객사가 이미 없어져 건너뜀`); continue; }
     const before = (target.addresses || []).length;
     target.addresses = (target.addresses || []).filter(x => x.id !== a.addressId);
-    if (target.addresses.length < before) deletedAddrCount++;
+    if (target.addresses.length < before) { deletedAddrCount++; addrDeletedCustIds.add(a.customerId); }
   }
+
+  // 주소를 지웠으면 고객사 대표 좌표(lat/lng)를 남은 주소 기준으로 다시 잡는다(v5.56).
+  // splitAddress()와 동일한 패턴. 이 필드는 addresses[]와 별개로 남아 있는 옛 구조라, 그대로 두면
+  // 지워진 주소의 옛 좌표가 남아 "지도에서 보기"(moveToMarker)·검색 결과 이동(selectSearchResultAddr)·
+  // 로드뷰(openRoadview)가 엉뚱한 위치를 가리키고, 주소가 전부 없어진 경우엔 renderAllMarkers의
+  // 구버전 호환 경로가 그 좌표로 유령 핀을 그린다. null로 만들어두면 그쪽 조건이 알아서 걸러낸다.
+  // 고객사당 한 번만 계산한다(주소를 여러 개 지워도 중복 계산 없음).
+  addrDeletedCustIds.forEach(custId => {
+    const target = customers.find(x => x.id === custId);
+    if (!target) return;
+    const firstAddr = (target.addresses || []).find(a => a.lat);
+    target.lat = firstAddr ? firstAddr.lat : null;
+    target.lng = firstAddr ? firstAddr.lng : null;
+  });
 
   // 고객사 전체 삭제 - 기존 deleteCustomer()와 동일한 소프트 삭제(tombstone + 휴지통), 확인창은 이미 미리보기가 대신함
   for (const c of freshDiff.deletedCustomers) {

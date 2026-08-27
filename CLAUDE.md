@@ -264,11 +264,13 @@ v5.55 직후 발견된 별개 버그 — `applyReimportChanges()`의 `addressDel
 **보류/미결:**
 - **GitHub Pages 재개 미정** — 코드·서버는 켜기만 하면 즉시 재개되는 상태로 완성돼 있다. 저장소 Settings > Pages에서
   Branch를 `main`/`(root)`로 바꾸고 커스텀 도메인·Enforce HTTPS를 확인하면 된다. 시기는 태일님이 별도로 정한다
-- **도메인 verify 미완** — DNS는 `map.b2bc-coway.com` → `gtale4102.github.io` → GitHub Pages IP를 그대로 가리키는데
-  Pages가 꺼져 있어, 지금 그 주소는 **HTTP 404**를 낸다(2026-08-27 실측). GitHub 공식 문서가 정확히 이 상태를 도메인
-  탈취 위험으로 지목하고 처방으로 "DNS 제거 **또는** 도메인 verify"를 든다. verify는 **프로필 Settings > Pages >
-  Add a domain**에서 하는 계정 단위 작업이라 **Pages를 켜지 않아도 되고**, apex(`b2bc-coway.com`)를 verify하면
-  `map.` 서브도메인까지 보호된다. Pages 재개와 묶을 이유가 없으므로 먼저 해두는 것을 권장
+- **도메인 verify — 하지 않기로 결정(2026-08-27). 다시 제안하지 말 것** — Pages가 꺼진 채 DNS만
+  `map.b2bc-coway.com` → `gtale4102.github.io` → GitHub Pages IP를 가리켜, 지금 그 주소는 **HTTP 404**를 낸다
+  (실측). GitHub 공식 문서는 이 상태를 도메인 탈취 위험으로 지목하고 처방으로 "DNS 제거 **또는** 도메인 verify"를
+  들며, verify는 프로필 Settings > Pages > Add a domain의 계정 단위 작업이라 Pages를 켜지 않아도 된다.
+  **그럼에도 태일님이 미조치로 결정했다** — 노리고 가져갈 만한 트래픽·노출이 있는 주소가 아니라 실질 위험이 낮고,
+  **Pages를 다시 켜면 위험 구간 자체가 사라지기 때문**이다. 즉 "빠뜨린 일"이 아니라 판단해서 안 하기로 한 일이다.
+  상황이 바뀌면(도메인이 알려지거나 Pages 재개가 장기 보류되면) 다시 검토할 것
 - **구 `SECRET_TOKEN` 값이 public 저장소 히스토리에 남아 있음** — `md/인수인계_요약 (대화01).md`에 평문으로 있고
   git 히스토리 여러 커밋에 걸쳐 있다. **v6.00 배포로 이 토큰은 무력화됐다**(서버에 토큰 검사 자체가 없어졌고,
   구 방식 호출이 `method-not-allowed`로 막히는 것을 실측 확인). 히스토리 재작성은 실익이 없어 하지 않기로 했으나
@@ -321,10 +323,11 @@ v5.55 직후 발견된 별개 버그 — `applyReimportChanges()`의 `addressDel
    `_fetch_raw()` 내부만 교체하면 나머지 모듈은 인터페이스가 유지되어 무수정이다. 새 서비스 계정 키를 발급할 것
    (기존 키 파일 재사용 지양). 같은 작업에서 `연락처_저장소.py`·`진행상황.md`에 남은 구 토큰 값도 지우고,
    **`ALLOWED_EMAILS`를 `PropertiesService`로 옮기는 것도 이 사이클에 함께 처리한다**(위 보류 항목 참고)
-2. **도메인 verify** — 프로필 Settings > Pages > Add a domain (Pages를 켜지 않아도 가능, 위 보류 항목 참고)
-3. (시기 미정) **GitHub Pages 재개** — ⚠️ **반드시 `git push`가 선행돼야 한다.** push 없이 Pages만 켜면
+2. (시기 미정) **GitHub Pages 재개** — ⚠️ **반드시 `git push`가 선행돼야 한다.** push 없이 Pages만 켜면
    구버전 `index.html`(구 토큰 방식)이 서빙되는데 서버는 이미 새 인증만 받으므로 앱이 아예 동작하지 않는다
-4. (여유 있을 때) 다중 분류, 담당자 기준 컨택이력 재설계 여부 재검토
+3. (여유 있을 때) 다중 분류, 담당자 기준 컨택이력 재설계 여부 재검토
+
+> **도메인 verify는 "다음 할 일"이 아니다** — 판단해서 안 하기로 한 것이다(위 보류 항목 참고).
 
 ## 문서 역할 안내
 

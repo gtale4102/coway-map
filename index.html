@@ -1030,7 +1030,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v6.00</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v6.01</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -1606,7 +1606,12 @@ async function onGoogleCredential(response) {
 
   // 승인되지 않은 계정 - 토큰을 버리고 자동 로그인을 꺼서 같은 계정으로 반복 시도되는 것을 막는다.
   idToken = null; idTokenExp = 0;
-  if (res && res.error === 'unauthorized') {
+  if (res && res.error === 'unauthorized' && res.reason === 'allowlist-unavailable') {
+    // 서버가 승인 계정 목록(스크립트 속성)을 못 읽은 경우다. 계정 잘못이 아니므로
+    // "승인되지 않은 계정"이라고 하면 안 된다 - 다른 계정으로 바꿔도 똑같이 막힌다.
+    setAuthMsg('서버 설정 문제로 로그인할 수 없습니다. 관리자에게 문의해 주세요.');
+    showAuthBtn('auth-retry-btn', true);
+  } else if (res && res.error === 'unauthorized') {
     try { google.accounts.id.disableAutoSelect(); } catch (e) {}
     setAuthMsg('승인되지 않은 계정입니다 (' + authEmail + '). 다른 계정으로 로그인해 주세요.');
     showAuthBtn('auth-switch-btn', true);

@@ -22,9 +22,14 @@
 // 담는 형식: 쉼표로 구분한다(공백·줄바꿈도 구분자로 함께 인정한다). 예) a@x.com, b@y.com
 var ALLOWED_EMAILS_PROPERTY = 'ALLOWED_EMAILS';
 
-// 이 웹앱이 신뢰하는 OAuth 클라이언트 ID. 비밀값이 아니며 클라이언트에도 그대로 들어간다.
-// aud 검증의 기준값이라 반드시 실제 값과 일치해야 한다(불일치 시 모든 요청이 거부된다).
-var OAUTH_CLIENT_ID = '110059101361-123fl3hr468polbh9thlud980jrv1vbo.apps.googleusercontent.com';
+// 이 웹앱이 신뢰하는 OAuth 클라이언트 ID 목록. 비밀값이 아니며 웹 클라이언트 ID는 index.html 에도 그대로 들어간다.
+// aud 검증의 기준값이라 반드시 실제 값과 일치해야 한다(목록에 없는 aud 의 토큰은 모두 거부된다).
+// 클라이언트를 목록에 넣는 것은 "그 앱에서 받은 토큰을 받아 준다"는 뜻일 뿐이며,
+// 계정 통제는 여전히 아래 승인 계정 목록이 맡는다.
+var OAUTH_CLIENT_IDS = [
+  '110059101361-123fl3hr468polbh9thlud980jrv1vbo.apps.googleusercontent.com', // 웹 - 고객사 관리 웹앱(index.html)
+  '110059101361-ibalm546ffmli4glblnad87n4fsaqeen.apps.googleusercontent.com'  // 데스크톱 - 고객사 관리 문자 발송 자동화
+];
 
 var TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo?id_token=';
 var VALID_ISSUERS = ['accounts.google.com', 'https://accounts.google.com'];
@@ -159,7 +164,7 @@ function verifyIdToken_(idToken) {
     return { ok: false, reason: 'tokeninfo-parse-failed' };
   }
 
-  if (info.aud !== OAUTH_CLIENT_ID) return { ok: false, reason: 'aud-mismatch' };
+  if (OAUTH_CLIENT_IDS.indexOf(String(info.aud)) === -1) return { ok: false, reason: 'aud-mismatch' };
   if (VALID_ISSUERS.indexOf(String(info.iss)) === -1) return { ok: false, reason: 'iss-mismatch' };
 
   var exp = parseInt(info.exp, 10);

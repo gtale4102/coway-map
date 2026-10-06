@@ -1030,7 +1030,7 @@
 <div class="bottom-sheet" id="settings-sheet">
   <div class="sheet-handle"></div>
   <div class="sheet-header">
-    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v6.02</span></div>
+    <div class="sheet-title">설정 <span style="font-size:11px; color:var(--text2); font-weight:400;">v6.03</span></div>
     <button class="sheet-close" onclick="closeAllSheets()">✕</button>
   </div>
   <div class="sheet-body">
@@ -5665,9 +5665,17 @@ async function applyReimportChanges() {
 
   renderAllMarkers();
   renderListBody();
-  await saveData();
+  // 저장 결과를 반드시 확인한다(v6.03). 종전에는 결과를 버리고 무조건 「반영 완료」를 띄워,
+  // 서버 저장이 실패해도(예: 시트 한 칸 5만 자 초과) 성공처럼 보였다 - 2026-10-05 가져오기 142줄
+  // 유실 사고. 실패하면 이 기기에만 남고 다음에 열 때 시트 내용으로 덮여 사라지므로 분명히 알린다.
+  const saveResult = await saveData();
+  const savedToServer = saveResult === 'confirmed';
 
-  let summary = `<div class="empty-state"><div>✅</div>반영 완료<br><small style="margin-top:6px;display:block;color:var(--text2);">`
+  let summary = (savedToServer
+    ? `<div class="empty-state"><div>✅</div>반영 완료<br><small style="margin-top:6px;display:block;color:var(--text2);">`
+    : `<div class="empty-state"><div>⚠️</div><b style="color:var(--danger);">서버 저장 실패</b><br>`
+      + `<small style="margin-top:6px;display:block;color:var(--danger);">이 기기 화면에만 반영되었습니다. 새로고침하거나 다른 기기에서 열면 사라집니다.<br>가져오기 파일은 그대로 두고, 원인을 확인한 뒤 다시 가져오세요.</small>`
+      + `<small style="margin-top:6px;display:block;color:var(--text2);">(화면에만 반영된 내용) `)
     + `추가 ${addedCount}건 · 컨택이력 ${addedLogCount}건 · 이름중복 병합 ${mergedCount}건 · 주소추가 ${addedAddrCount}건 · 수정 ${modifiedCount}건 · 주소삭제 ${deletedAddrCount}건 · 고객사삭제 ${deletedCustCount}건`
     + `</small></div>`;
   if (skipped.length > 0) {
@@ -5676,7 +5684,7 @@ async function applyReimportChanges() {
   }
   summary += `<button class="submit-btn" onclick="closeAllSheets()" style="margin-top:16px;">확인</button>`;
   document.getElementById('reimport-body').innerHTML = summary;
-  showToast('가져오기 반영 완료');
+  showToast(savedToServer ? '가져오기 반영 완료' : '⚠️ 서버 저장 실패 - 이 기기에만 반영됨');
 }
 
 // ==================== DRAG SCROLL (마우스로 가로 스크롤) ====================

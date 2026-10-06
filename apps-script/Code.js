@@ -80,6 +80,69 @@ function getSheet_() {
   return ss.getSheetByName('데이터') || ss.insertSheet('데이터');
 }
 
+// ── 데이터 저장 형식 (2026-10 칸 나누기) ──────────────────────────────────────
+// 구글 시트는 한 칸에 50,000자까지만 들어간다. 종전에는 전체 JSON 을 A1 한 칸에 넣어,
+// 데이터가 커지자 저장이 통째로 실패했다(2026-10-05 엑셀 가져오기 142줄 유실의 원인).
+// 그래서 JSON 문자열을 A열 여러 칸에 나눠 쓰고, 읽을 때 이어 붙인다. load 가 돌려주는
+// 데이터 모양은 그대로라 화면 코드와 문자발송은 바뀌지 않는다.
+//
+// 칸마다 "~번호/전체칸수:조각" 형식으로 쓴다.
+//  - 머리의 "~" 덕분에 조각이 = + - @ 나 숫자로 시작해도 시트가 수식·숫자로 바꾸지 않는다.
+//  - 전체 칸 수를 칸마다 적어 두므로, 데이터가 줄어 뒤쪽에 옛 칸이 남아도 읽을 때 섞이지 않고,
+//    번호·칸 수가 하나라도 어긋나면 읽기를 거부한다(깨진 데이터를 정상인 척 돌려주지 않는다).
+//  - 모든 칸을 setValues 한 번으로 쓴다(남는 뒤쪽 칸은 같은 호출에서 빈 값으로 지운다).
+// A1 이 "~" 로 시작하지 않으면 예전 형식(A1 한 칸에 JSON 통째)으로 읽는다 - 첫 저장 전까지의 호환.
+// 주의: 한 번 이 형식으로 저장된 뒤 예전 코드로 되돌리면 예전 코드는 A1 만 읽어 corrupt-data 가 된다.
+var CHUNK_SIZE_ = 40000;
+var CHUNK_HEAD_RE_ = /^~(\d+)\/(\d+):/;
+
+function readBlob_(sheet) {
+  var first = sheet.getRange(1, 1).getValue();
+  first = (first === null || first === undefined) ? '' : String(first);
+  if (first.charAt(0) !== '~') return first; // 예전 형식
+  var m = CHUNK_HEAD_RE_.exec(first);
+  if (!m || m[1] !== '1') throw new Error('chunk-header');
+  var total = parseInt(m[2], 10);
+  if (!(total >= 1)) throw new Error('chunk-header');
+  var vals = sheet.getRange(1, 1, total, 1).getValues();
+  var parts = [];
+  for (var i = 0; i < total; i++) {
+    var cell = String(vals[i][0]);
+    var mm = CHUNK_HEAD_RE_.exec(cell);
+    if (!mm || parseInt(mm[1], 10) !== i + 1 || parseInt(mm[2], 10) !== total) throw new Error('chunk-mismatch');
+    parts.push(cell.substring(mm[0].length));
+  }
+  return parts.join('');
+}
+
+function splitChunks_(text) {
+  var chunks = [];
+  var pos = 0;
+  while (pos < text.length) {
+    var end = Math.min(pos + CHUNK_SIZE_, text.length);
+    // 이모지 같은 글자(UTF-16 두 단위)가 칸 경계에서 반으로 갈리지 않게 한 단위 당긴다.
+    if (end < text.length) {
+      var code = text.charCodeAt(end - 1);
+      if (code >= 0xD800 && code <= 0xDBFF) end -= 1;
+    }
+    chunks.push(text.substring(pos, end));
+    pos = end;
+  }
+  if (chunks.length === 0) chunks.push('');
+  return chunks;
+}
+
+function writeBlob_(sheet, text) {
+  var chunks = splitChunks_(String(text));
+  var n = chunks.length;
+  var rows = Math.max(n, sheet.getLastRow());
+  var out = [];
+  for (var i = 0; i < rows; i++) {
+    out.push([i < n ? ('~' + (i + 1) + '/' + n + ':' + chunks[i]) : '']);
+  }
+  sheet.getRange(1, 1, rows, 1).setValues(out);
+}
+
 // 클라이언트에 내보내도 안전한 예외 이름만 통과시킨다. 목록에 없는 이름은 전부 'Error' 로
 // 뭉개서, 예외 이름·메시지를 통해 내부 정보가 흘러나갈 여지를 없앤다.
 function safeErrName_(err) {
@@ -198,14 +261,20 @@ function json_(obj) {
 }
 
 function handleLoad_(sheet) {
-  var raw = sheet.getRange(1, 1).getValue();
-  var data;
-  try {
-    data = raw ? JSON.parse(raw) : { customers: [], categories: [], routeHistory: [] };
-  } catch (err) {
-    return { ok: false, error: 'corrupt-data' };
+  // 잠금 없이 읽는다. 조회가 저장 잠금을 기다리다 시간 초과로 실패하면, 이 엔드포인트를 읽는
+  // 문자발송 프로그램이 모르는 오류 종류(lock-timeout)가 새로 생기기 때문이다. 대신 여러 칸을 쓰는
+  // 도중에 읽어 칸이 어긋나거나 JSON 해석이 안 되면 0.5초 뒤 한 번 다시 읽는다. 그래도 안 되면
+  // 종전과 같은 corrupt-data 로 답한다 - 응답 모양과 오류 종류는 v6.02 와 같다.
+  for (var attempt = 0; attempt < 2; attempt++) {
+    try {
+      var raw = readBlob_(sheet);
+      var data = raw ? JSON.parse(raw) : { customers: [], categories: [], routeHistory: [] };
+      return { ok: true, data: data };
+    } catch (err) {
+      if (attempt === 0) Utilities.sleep(500);
+    }
   }
-  return { ok: true, data: data };
+  return { ok: false, error: 'corrupt-data' };
 }
 
 // 고객사ID(+주소ID)를 찾아 logs[]에 이력 1건만 append하고 결과 객체를 반환한다(순수 데이터,
@@ -227,7 +296,12 @@ function handleAppendLogData_(sheet, params) {
     return { ok: false, error: 'lock-timeout' };
   }
   try {
-    var raw = sheet.getRange(1, 1).getValue();
+    var raw;
+    try {
+      raw = readBlob_(sheet);
+    } catch (err) {
+      return { ok: false, error: 'corrupt-data' };
+    }
     var data;
     try {
       data = raw ? JSON.parse(raw) : { customers: [], categories: [], routeHistory: [] };
@@ -242,7 +316,7 @@ function handleAppendLogData_(sheet, params) {
 
     if (!customer.logs) customer.logs = [];
     customer.logs.push({ type: logType, date: logDate, memo: logMemo, addressId: addressId || undefined });
-    sheet.getRange(1, 1).setValue(JSON.stringify(data));
+    writeBlob_(sheet, JSON.stringify(data));
     return { ok: true };
   } finally {
     lock.releaseLock();
@@ -267,7 +341,7 @@ function handleFullSave_(sheet, params) {
     return { ok: false, error: 'lock-timeout' };
   }
   try {
-    sheet.getRange(1, 1).setValue(params.payload);
+    writeBlob_(sheet, params.payload);
     return { ok: true };
   } finally {
     lock.releaseLock();
